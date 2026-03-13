@@ -1296,9 +1296,10 @@ static bool performAction(CompilerInstance &Instance, int &ReturnValue,
     return printSwiftVersion(Instance.getInvocation());
   case FrontendOptions::ActionType::PrintArguments:
     return printSwiftArguments(Instance);
-  case FrontendOptions::ActionType::REPL:
-    llvm::report_fatal_error("Compiler-internal integrated REPL has been "
-                             "removed; use the LLDB-enhanced REPL instead.");
+  case FrontendOptions::ActionType::REPL: {
+    runREPL(Instance, ProcessCmdLine(CommandLineArgs.begin(), CommandLineArgs.end()), Instance.getInvocation().getParseStdlib());
+    return Instance.getASTContext().hadError();
+  }
 
   // MARK: Actions for Clang and Clang Modules
   case FrontendOptions::ActionType::EmitPCH:

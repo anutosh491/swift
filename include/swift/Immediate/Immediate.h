@@ -44,6 +44,13 @@ namespace swift {
 
   int RunImmediatelyFromAST(CompilerInstance &CI);
 
+  /// Run the integrated Swift REPL.
+  ///
+  /// \param CI The compiler instance, already configured for REPL mode.
+  /// \param ParseStdlib If true, parse the stdlib (for testing).
+  void runREPL(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
+               bool ParseStdlib);
+
 } // end namespace swift
 
 #endif // SWIFT_IMMEDIATE_IMMEDIATE_H
