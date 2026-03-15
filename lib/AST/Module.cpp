@@ -3605,6 +3605,17 @@ void SourceFile::prependTopLevelDecl(Decl *d) {
   ctx.evaluator.clearCachedOutput(ParseTopLevelDeclsRequest{mutableThis});
 }
 
+void SourceFile::replaceTopLevelItems(ArrayRef<ASTNode> newItems) {
+  // Force decl parsing if we haven't already.
+  (void)getTopLevelItems();
+  *Items = std::vector<ASTNode>(newItems.begin(), newItems.end());
+
+  // FIXME: This violates core properties of the evaluator.
+  auto &ctx = getASTContext();
+  auto *mutableThis = const_cast<SourceFile *>(this);
+  ctx.evaluator.clearCachedOutput(ParseTopLevelDeclsRequest{mutableThis});
+}
+
 void SourceFile::addDelayedFunction(AbstractFunctionDecl *AFD) {
   // If we defer type checking to runtime, we won't
   // have to type check `AFD` ahead of time

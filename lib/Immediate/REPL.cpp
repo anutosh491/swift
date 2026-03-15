@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "REPLTransforms.h"
 #include "swift/Immediate/Immediate.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/DiagnosticsFrontend.h"
@@ -18,6 +19,7 @@
 #include "swift/AST/SourceFile.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Subsystems.h"
+#include "swift/SILOptimizer/PassManager/Passes.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <iostream>
@@ -91,6 +93,10 @@ typeCheckREPLInput(ModuleDecl *MostRecentModule, StringRef Name,
   performImportResolution(*REPLInputFile);
   bindExtensions(*REPLModule);
   performTypeChecking(*REPLInputFile);
+
+  // AST transform: collect any top-level executable statements into a
+  // single __repl_N() function.  Pure-declaration inputs get an empty stub.
+  wrapTopLevelCodeInFunction(*REPLInputFile, Name);
 
   return {REPLModule, REPLInputFile};
 }

@@ -270,6 +270,13 @@ public:
   /// See rdar://58355191
   void prependTopLevelDecl(Decl *d);
 
+  /// Replaces all top-level items with \p newItems.
+  ///
+  /// Only for use by REPL AST transforms that reorganize the top-level
+  /// structure after type-checking (e.g. wrapping TopLevelCodeDecl bodies
+  /// into a synthesized wrapper function).
+  void replaceTopLevelItems(ArrayRef<ASTNode> newItems);
+
   /// Add a hoisted declaration. See Decl::isHoisted().
   void addHoistedDecl(Decl *d);
 
