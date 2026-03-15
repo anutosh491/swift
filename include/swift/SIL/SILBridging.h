@@ -525,6 +525,7 @@ struct BridgedFunction {
     Interface,
     MacroExpansion,
     DefaultArgument, // must match swift::SourceFileKind::DefaultArgument
+    REPL,            // must match swift::SourceFileKind::REPL
     None
   };
 

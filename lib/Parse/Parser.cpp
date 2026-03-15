@@ -333,6 +333,7 @@ static LexerMode sourceFileKindToLexerMode(SourceFileKind kind) {
     case swift::SourceFileKind::Main:
     case swift::SourceFileKind::MacroExpansion:
     case swift::SourceFileKind::DefaultArgument:
+    case swift::SourceFileKind::REPL:
       return LexerMode::Swift;
   }
   llvm_unreachable("covered switch");
@@ -520,7 +521,7 @@ bool Parser::shouldEvaluatePoundIfDecls() const {
 }
 
 bool Parser::allowTopLevelCode() const {
-  return SF.isScriptMode();
+  return SF.allowsTopLevelCode();
 }
 
 bool Parser::isInMacroExpansion(SourceLoc loc) const {

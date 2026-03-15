@@ -374,6 +374,7 @@ final public class Function : CustomStringConvertible, HasShortDescription, Hash
     case interface       /// Came from a .swiftinterface file, representing another module.
     case macroExpansion  /// Came from a macro expansion.
     case defaultArgument /// Came from default argument at caller side
+    case repl            /// Came from the REPL
   };
 
   public var sourceFileKind: SourceFileKind? {
@@ -384,6 +385,7 @@ final public class Function : CustomStringConvertible, HasShortDescription, Hash
     case .Interface: return .interface
     case .MacroExpansion: return .macroExpansion
     case .DefaultArgument: return .defaultArgument
+    case .REPL: return .repl
     case .None: return nil
     @unknown default:
       fatalError("unknown enum case")
