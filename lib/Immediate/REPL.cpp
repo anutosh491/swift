@@ -164,6 +164,33 @@ public:
     // Dump the type-checked AST.
     Result.InputFile->dump(llvm::outs());
 
+    // ── Step 5: SIL lowering ──────────────────────────────────────────────
+    // Lower the transformed AST to SIL.  We use the CompilerInstance's shared
+    // TypeConverter and SILOptions so that type-lowering state is consistent
+    // across REPL cells.
+    auto SILMod = performASTLowering(*Result.InputFile,
+                                     CI.getSILTypes(),
+                                     CI.getSILOptions());
+
+    // Run the mandatory SIL diagnostic passes (definite initialisation,
+    // memory lifetime, etc.).  Returns true if any error was emitted.
+    if (runSILDiagnosticPasses(*SILMod) || Ctx.hadError()) {
+      Ctx.Diags.resetHadAnyError();
+      return true;
+    }
+
+    // Lower ownership and prepare for IRGen.
+    runSILLoweringPasses(*SILMod);
+
+    if (Ctx.hadError()) {
+      Ctx.Diags.resetHadAnyError();
+      return true;
+    }
+
+    // Dump the fully-lowered SIL — this is what goes into IRGen, and the
+    // right point to compare against `swiftc -emit-sil -parse-as-library`.
+    SILMod->print(llvm::outs(), Result.Module);
+
     // Success — this module becomes the most recent for import chaining.
     MostRecentModule = Result.Module;
 

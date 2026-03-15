@@ -13,6 +13,7 @@
 #include "REPLTransforms.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTNode.h"
+#include "swift/AST/Attr.h"
 #include "swift/AST/Decl.h"
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/SourceFile.h"
@@ -76,7 +77,19 @@ void swift::wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName) {
   func->setBody(body, AbstractFunctionDecl::BodyKind::TypeChecked);
 
   // Make the function public so the JIT can look it up by name.
+  //
+  // Two separate steps are required:
+  // 1. setAccess() writes AccessLevel into the TypeAndAccess bitfield.
+  //    SILDeclRef::getDefinitionLinkage() reads getEffectiveAccess() through
+  //    this bitfield → SILLinkage::Public.  This is what matters for JIT.
+  // 2. Adding an AccessControlAttr to getAttrs() is needed for the SIL module
+  //    printer (PrintOptions::printSIL() has PrintAccess=false, so it only
+  //    prints access if an explicit attr is present).  Without this the
+  //    declarations header shows "func __repl_N()" instead of
+  //    "public func __repl_N()" — purely cosmetic, but confusing.
   func->setAccess(AccessLevel::Public);
+  func->getAttrs().add(new (Ctx) AccessControlAttr(
+      SourceLoc(), SourceRange(), AccessLevel::Public, /*implicit=*/true));
 
   // Replace the source file's item list (TLCDs dropped, FuncDecl appended).
   newItems.push_back(func);
