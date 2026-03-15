@@ -100,6 +100,7 @@ enum class SourceFileKind {
   Interface, ///< Came from a .swiftinterface file, representing another module.
   MacroExpansion, ///< Came from a macro expansion.
   DefaultArgument, ///< Came from default argument at caller side
+  REPL,     ///< A REPL input. Parses like Library (no main entry point) but permits top-level statements and expressions.
 };
 
 /// Contains information about where a particular path is used in

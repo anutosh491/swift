@@ -192,6 +192,7 @@ void Parser::parseTopLevelItems(SmallVectorImpl<ASTNode> &items) {
     BraceItemListKind braceItemListKind;
     switch (SF.Kind) {
     case SourceFileKind::Main:
+    case SourceFileKind::REPL:
       braceItemListKind = BraceItemListKind::TopLevelCode;
       break;
 
@@ -8929,13 +8930,15 @@ Parser::parseDeclVar(ParseDeclOptions Flags,
                  Attributes.hasAttribute<ConstValAttr>() ||
                  Attributes.hasAttribute<ExternAttr>();
 
-  // If this is a var in the top-level of script/repl source file, wrap the
-  // PatternBindingDecl in a TopLevelCodeDecl, since it represents executable
-  // code.  The VarDecl and any accessor decls (for computed properties) go in
-  // CurDeclContext.  @const/@section globals are not top-level, per SE-0492.
-  // We follow the same rule for @_extern.
+  // If this is a var in the top-level of a script (Main) source file, wrap the
+  // PatternBindingDecl in a TopLevelCodeDecl so the initializer runs as part
+  // of the sequential @main execution.  REPL files use library-style semantics
+  // (isScriptMode()==false) so PatternBindingDecls are bare module-level
+  // globals there, matching '-parse-as-library' behavior.  VarDecls and
+  // accessor decls go in CurDeclContext in both cases.
+  // @const/@section globals are not top-level, per SE-0492; same for @_extern.
   TopLevelCodeDecl *topLevelDecl = nullptr;
-  if (allowTopLevelCode() && CurDeclContext->isModuleScopeContext() &&
+  if (SF.isScriptMode() && CurDeclContext->isModuleScopeContext() &&
       !IsConst) {
     // The body of topLevelDecl will get set later.
     topLevelDecl = new (Context) TopLevelCodeDecl(CurDeclContext);
@@ -10432,6 +10435,7 @@ parseDeclDeinit(ParseDeclOptions Flags, DeclAttributes &Attributes) {
     case SourceFileKind::Main:
     case SourceFileKind::MacroExpansion:
     case SourceFileKind::DefaultArgument:
+    case SourceFileKind::REPL:
       if (Tok.is(tok::identifier)) {
         diagnose(Tok, diag::destructor_has_name).fixItRemove(Tok.getLoc());
         consumeToken();

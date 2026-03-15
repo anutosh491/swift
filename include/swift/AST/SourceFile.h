@@ -724,6 +724,24 @@ public:
     return isa<FileUnit>(DC) && classof(cast<FileUnit>(DC));
   }
 
+  /// True if this source file permits top-level statements and expressions.
+  /// Unlike isScriptMode(), this does not affect how declarations are lowered.
+  bool allowsTopLevelCode() const {
+    switch (Kind) {
+    case SourceFileKind::Main:
+    case SourceFileKind::REPL:
+      return true;
+
+    case SourceFileKind::Library:
+    case SourceFileKind::Interface:
+    case SourceFileKind::SIL:
+    case SourceFileKind::MacroExpansion:
+    case SourceFileKind::DefaultArgument:
+      return false;
+    }
+    llvm_unreachable("bad SourceFileKind");
+  }
+
   /// True if this is a "script mode" source file that admits top-level code.
   bool isScriptMode() const {
     switch (Kind) {
@@ -735,6 +753,7 @@ public:
     case SourceFileKind::SIL:
     case SourceFileKind::MacroExpansion:
     case SourceFileKind::DefaultArgument:
+    case SourceFileKind::REPL:
       return false;
     }
     llvm_unreachable("bad SourceFileKind");

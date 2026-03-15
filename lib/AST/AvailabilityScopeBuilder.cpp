@@ -1273,6 +1273,7 @@ AvailabilityScope *AvailabilityScope::getOrBuildForSourceFile(SourceFile &SF) {
   case SourceFileKind::Library:
   case SourceFileKind::Main:
   case SourceFileKind::Interface:
+  case SourceFileKind::REPL:
     break;
   }
   ASTContext &ctx = SF.getASTContext();
