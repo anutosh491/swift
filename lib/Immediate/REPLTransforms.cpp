@@ -23,7 +23,7 @@
 
 using namespace swift;
 
-void swift::wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName) {
+FuncDecl *swift::wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName) {
   ASTContext &Ctx = SF.getASTContext();
 
   // Collect statements from all TopLevelCodeDecl nodes and build a new
@@ -99,4 +99,6 @@ void swift::wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName) {
   assert(llvm::none_of(SF.getTopLevelDecls(),
                        [](Decl *D) { return isa<TopLevelCodeDecl>(D); }) &&
          "wrapTopLevelCodeInFunction: all TopLevelCodeDecl nodes must be gone");
+
+  return func;
 }

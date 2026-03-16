@@ -22,6 +22,7 @@
 #include "swift/Basic/LLVM.h"
 
 namespace swift {
+class FuncDecl;
 class SourceFile;
 
 /// Wraps all TopLevelCodeDecl bodies found in \p SF into a single synthesized
@@ -31,7 +32,10 @@ class SourceFile;
 /// has a well-known entry point to invoke.
 ///
 /// Must be called after type-checking and before SIL lowering.
-void wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName);
+///
+/// Returns a pointer to the synthesized FuncDecl so callers can compute its
+/// linker-level symbol via SILDeclRef(result).mangle().
+FuncDecl *wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName);
 
 } // end namespace swift
 

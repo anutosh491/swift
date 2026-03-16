@@ -11,16 +11,31 @@
 //===----------------------------------------------------------------------===//
 
 #include "REPLTransforms.h"
+#include "ImmediateImpl.h"
 #include "swift/Immediate/Immediate.h"
+#include "swift/Immediate/SwiftMaterializationUnit.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/DiagnosticsFrontend.h"
+#include "swift/AST/IRGenOptions.h"
+#include "swift/AST/IRGenRequests.h"
 #include "swift/AST/Import.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/SourceFile.h"
+#include "swift/AST/TBDGenRequests.h"
 #include "swift/Frontend/Frontend.h"
+#include "swift/SIL/SILDeclRef.h"
 #include "swift/Subsystems.h"
 #include "swift/SILOptimizer/PassManager/Passes.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include <iostream>
 #include <string>
@@ -33,6 +48,9 @@ namespace {
 struct REPLInputResults {
   ModuleDecl *Module;
   SourceFile *InputFile;
+  /// The synthesized __repl_N() wrapper function. Use SILDeclRef(WrapperFunc)
+  /// to compute the Swift-mangled symbol name for JIT lookup.
+  FuncDecl *WrapperFunc;
 };
 
 /// Type-check a single REPL input line, creating a new module for it.
@@ -62,11 +80,16 @@ typeCheckREPLInput(ModuleDecl *MostRecentModule, StringRef Name,
   //       ImportOptions({ImportFlags::Testable})));
   // and call REPLModule->setTestingEnabled(true) after module creation.
 
-  // Carry over the non-exported imports from the previous module
+  // Carry over all locally-written imports from the previous module
   // (e.g. user-written 'import Foundation') so they remain visible.
+  // We use getImportFilterLocal() to capture every import kind the user
+  // could write: @_exported, regular public (Default), @_implementationOnly,
+  // package, internal/fileprivate/private, and @_spiOnly.  In particular
+  // 'import Foundation' is a Default (public) import and would be silently
+  // dropped if we only queried InternalOrBelow.
   SmallVector<ImportedModule, 8> imports;
   MostRecentModule->getImportedModules(
-      imports, ModuleDecl::ImportFilterKind::InternalOrBelow);
+      imports, ModuleDecl::getImportFilterLocal());
   for (auto &import : imports) {
     importInfo.AdditionalImports.emplace_back(AttributedImport<ImportedModule>(
         import, SourceLoc(), ImportOptions({ImportFlags::Exported})));
@@ -96,9 +119,9 @@ typeCheckREPLInput(ModuleDecl *MostRecentModule, StringRef Name,
 
   // AST transform: collect any top-level executable statements into a
   // single __repl_N() function.  Pure-declaration inputs get an empty stub.
-  wrapTopLevelCodeInFunction(*REPLInputFile, Name);
+  FuncDecl *WrapperFD = wrapTopLevelCodeInFunction(*REPLInputFile, Name);
 
-  return {REPLModule, REPLInputFile};
+  return {REPLModule, REPLInputFile, WrapperFD};
 }
 
 /// The compiler and execution environment for the REPL.
@@ -106,6 +129,9 @@ class REPLEnvironment {
   CompilerInstance &CI;
   ModuleDecl *MostRecentModule;
   unsigned InputNumber = 1;
+  /// Long-lived JIT session.  All REPL cells share the same JITDylib so that
+  /// declarations from earlier cells are visible in later ones.
+  std::unique_ptr<SwiftJIT> JIT;
 
 public:
   REPLEnvironment(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
@@ -113,20 +139,111 @@ public:
       : CI(CI), MostRecentModule(CI.getMainModule()) {
 
     ASTContext &Ctx = CI.getASTContext();
+    const auto &IRGenOpts = CI.getInvocation().getIRGenOptions();
 
+    // ── Step 1: Load libswiftCore into the host process ──────────────────────
+    //
+    // This MUST happen before SwiftJIT::Create, because the JIT installs a
+    // DynamicLibrarySearchGenerator that forwards unresolved symbol lookups to
+    // the host process's dynamic linker.  Every JIT'd cell that calls into the
+    // Swift runtime (swift_retain, swift_release, swift_once, _swift_stdlib_*,
+    // print(), etc.) resolves its symbols through that generator.  If
+    // libswiftCore is not in the process at JIT-link time, all those calls will
+    // produce "symbol not found" errors at runtime.
+    //
+    // ParseStdlib == true means we are building the stdlib itself (the
+    // -parse-stdlib frontend flag).  In that case libswiftCore does not exist
+    // yet, so we must skip this step – and the warmup below – entirely.
     if (!ParseStdlib) {
-      // Force standard library to be loaded immediately. This forces any
-      // errors to appear upfront, and helps eliminate some nasty lag after the
-      // first statement is typed into the REPL.
-      static const char WarmUpStmt[] = "Void()\n";
-
-      auto Buffer =
-          llvm::MemoryBuffer::getMemBufferCopy(WarmUpStmt,
-                                               "<REPL Initialization>");
-      (void)typeCheckREPLInput(MostRecentModule, "__Warmup", std::move(Buffer));
-
-      if (Ctx.hadError())
+#if defined(_WIN32)
+      llvm::outs() << "[REPL] Loading Swift runtime (Windows)...\n";
+      auto *stdlib =
+          swift::immediate::loadSwiftRuntime(Ctx.SearchPathOpts.RuntimeLibraryPaths);
+      if (!stdlib) {
+        CI.getDiags().diagnose(SourceLoc(),
+                               diag::error_immediate_mode_missing_stdlib);
         return;
+      }
+      llvm::outs() << "[REPL] Swift runtime loaded.\n";
+#else
+      // On non-Windows, swift-frontend is often a Swift binary and already
+      // has libswiftCore linked in.  Check for a known runtime symbol before
+      // attempting a second dlopen.
+      if (dlsym(RTLD_DEFAULT, "swift_retain")) {
+        llvm::outs() << "[REPL] Swift runtime already in process (linked).\n";
+      } else {
+        dlerror(); // clear stale error from the failed dlsym
+        llvm::outs() << "[REPL] Loading Swift runtime from: ";
+        for (const auto &p : Ctx.SearchPathOpts.RuntimeLibraryPaths)
+          llvm::outs() << p << " ";
+        llvm::outs() << "\n";
+        auto *stdlib = swift::immediate::loadSwiftRuntime(
+            Ctx.SearchPathOpts.RuntimeLibraryPaths);
+        if (!stdlib) {
+          CI.getDiags().diagnose(SourceLoc(),
+                                 diag::error_immediate_mode_missing_stdlib);
+          return;
+        }
+        llvm::outs() << "[REPL] Swift runtime loaded via dlopen.\n";
+      }
+#endif
+    }
+
+    // ── Step 2: Autolink any libraries the main module depends on ────────────
+    //
+    // autolinkImportedModules walks IRGenOpts.LinkLibraries plus the set of
+    // modules that the given ModuleDecl imports, and calls dlopen for each.
+    // At REPL startup the main module is empty (no cells parsed yet), so this
+    // primarily picks up command-line -l flags from IRGenOpts.LinkLibraries.
+    // Per-cell imports (e.g. `import Foundation`) are handled in handleInput
+    // after each cell's type-checking.
+    llvm::outs() << "[REPL] Autolinking startup libraries...\n";
+    if (swift::immediate::autolinkImportedModules(CI.getMainModule(),
+                                                  IRGenOpts)) {
+      llvm::errs() << "[REPL] error: autolinkImportedModules failed\n";
+      return;
+    }
+    llvm::outs() << "[REPL] Startup autolinking done.\n";
+
+    // ── Step 3: Create the JIT session ───────────────────────────────────────
+    //
+    // SwiftJIT wraps an ORC LLJIT with:
+    //   - JITTargetMachineBuilder configured from IRGenOpts (target triple,
+    //     CPU, features, relocation model PIC)
+    //   - DynamicLibrarySearchGenerator for the host process, so any symbol
+    //     dlopen'd in Steps 1-2 is visible to JIT'd code
+    //   - EPCIndirectionUtils + LazyCallThroughManager for future lazy
+    //     compilation support (not used in eager REPL mode)
+    // The session lives for the entire REPL lifetime; all cells share the
+    // same main JITDylib, so declarations from cell N are visible in cell N+1.
+    llvm::outs() << "[REPL] Creating ORC JIT session...\n";
+    auto JITOrErr = SwiftJIT::Create(CI);
+    if (auto Err = JITOrErr.takeError()) {
+      logAllUnhandledErrors(std::move(Err), llvm::errs());
+      return;
+    }
+    JIT = std::move(*JITOrErr);
+    llvm::outs() << "[REPL] ORC JIT session ready.\n";
+
+    // ── Step 4: Stdlib type-checker warmup ───────────────────────────────────
+    //
+    // ParseStdlib == false is the normal case (we are NOT building the stdlib).
+    // Parsing a trivial statement forces the Swift type-checker to lazily load
+    // all stdlib AST nodes upfront, so the first real user input does not
+    // incur an unexpected pause.  This is a type-check-only step; the warmup
+    // cell is intentionally NOT JIT-compiled or executed.
+    if (!ParseStdlib) {
+      llvm::outs() << "[REPL] Running stdlib type-checker warmup...\n";
+      static const char WarmUpStmt[] = "Void()\n";
+      auto Buffer = llvm::MemoryBuffer::getMemBufferCopy(
+          WarmUpStmt, "<REPL Initialization>");
+      (void)typeCheckREPLInput(MostRecentModule, "__Warmup",
+                               std::move(Buffer));
+      if (Ctx.hadError()) {
+        llvm::errs() << "[REPL] error: stdlib warmup failed\n";
+        return;
+      }
+      llvm::outs() << "[REPL] Stdlib warmup done.\n";
     }
   }
 
@@ -135,6 +252,12 @@ public:
   /// Execute one line of REPL input. Returns true to continue, false to quit.
   bool handleInput(llvm::StringRef Line) {
     ASTContext &Ctx = CI.getASTContext();
+
+    // Bail out if JIT setup failed during construction.
+    if (!JIT) {
+      llvm::errs() << "REPL: JIT unavailable\n";
+      return false;
+    }
 
     // Check for quit commands.
     llvm::StringRef Trimmed = Line.trim();
@@ -161,8 +284,20 @@ public:
       return true;
     }
 
+    // Autolink any libraries introduced by this cell's imports (e.g.
+    // `import Foundation` in cell N triggers dlopen of libswiftFoundation so
+    // the JIT can resolve Foundation symbols when compiling cell N+1).
+    const auto &IRGenOpts = CI.getInvocation().getIRGenOptions();
+    swift::immediate::autolinkImportedModules(Result.Module, IRGenOpts);
+
     // Dump the type-checked AST.
-    Result.InputFile->dump(llvm::outs());
+    // Result.InputFile->dump(llvm::outs());
+
+    // Compute the linker-level symbol name for __repl_N() now, while we still
+    // hold the FuncDecl pointer and before the SILModule consumes it.
+    // SILDeclRef::mangle() uses ASTMangler and doesn't need the SIL module.
+    std::string SILMangledName = SILDeclRef(Result.WrapperFunc).mangle();
+    // llvm::outs() << "-- JIT entry point: " << SILMangledName << "\n";
 
     // ── Step 5: SIL lowering ──────────────────────────────────────────────
     // Lower the transformed AST to SIL.  We use the CompilerInstance's shared
@@ -187,9 +322,71 @@ public:
       return true;
     }
 
-    // Dump the fully-lowered SIL — this is what goes into IRGen, and the
-    // right point to compare against `swiftc -emit-sil -parse-as-library`.
-    SILMod->print(llvm::outs(), Result.Module);
+    // Dump the fully-lowered SIL.
+    // SILMod->print(llvm::outs(), Result.Module);
+
+    // ── Step 6: IRGen ─────────────────────────────────────────────────────
+    // Lower the SIL module to LLVM IR.  Mirrors generateModule() inside
+    // SwiftMaterializationUnit.cpp; we replicate it here so we control the
+    // module operand (Result.Module, not CI.getMainModule()).
+    const auto &TBDOpts = CI.getInvocation().getTBDGenOptions();
+    const auto PSPs = CI.getPrimarySpecificPathsForAtMostOnePrimary();
+
+    auto GenModule = performIRGeneration(
+        Result.Module, IRGenOpts, TBDOpts, std::move(SILMod),
+        Name.str(), PSPs, /*CAS=*/nullptr,
+        /*parallelOutputFilenames=*/ArrayRef<std::string>(),
+        /*parallelIROutputFilenames=*/ArrayRef<std::string>());
+
+    if (Ctx.hadError()) {
+      Ctx.Diags.resetHadAnyError();
+      return true;
+    }
+    assert(GenModule && "IR generation succeeded without emitting a module?");
+
+    // Run the Swift LLVM optimization pipeline (inlining, peephole, etc.)
+    // in-memory.  We use performLLVMOptimizations rather than performLLVM
+    // because the latter also runs the backend codegen, which lowers the module
+    // to machine code and leaves it in a state the JIT cannot consume.  The
+    // JIT's IRCompileLayer handles the IR → machine-code step itself.
+    // Pass out=nullptr so no IR is written to disk.
+    auto *LLVMModule = GenModule.getModule();
+    performLLVMOptimizations(IRGenOpts, Ctx.Diags, /*diagMutex=*/nullptr,
+                             LLVMModule, GenModule.getTargetMachine(),
+                             /*out=*/nullptr);
+
+    if (Ctx.hadError()) {
+      Ctx.Diags.resetHadAnyError();
+      return true;
+    }
+
+    // Dump the post-optimisation LLVM IR — this is exactly what the JIT will
+    // compile to machine code; nothing transforms the module after this point.
+    // llvm::outs() << "-- LLVM IR (post-optimisation, pre-JIT) --\n";
+    // LLVMModule->print(llvm::outs(), /*AssemblyAnnotationWriter=*/nullptr);
+
+    // ── Step 7: JIT add + execute ─────────────────────────────────────────
+    // Register the LLVM IR module with the persistent JIT session.  All
+    // public symbols become discoverable by subsequent cells via the shared
+    // main JITDylib.
+    auto TSM = std::move(GenModule).intoThreadSafeContext();
+    if (auto Err = JIT->addIRModule(std::move(TSM))) {
+      logAllUnhandledErrors(std::move(Err), llvm::errs());
+      return true;
+    }
+
+    // Look up the cell-wrapper function by its Swift-mangled name.
+    // LLJIT::lookup() applies the platform prefix (_) internally, so we pass
+    // the bare Swift mangled name (e.g. "$s8__repl_1AAyyF").
+    auto Sym = JIT->lookup(SILMangledName);
+    if (!Sym) {
+      logAllUnhandledErrors(Sym.takeError(), llvm::errs());
+      return true;
+    }
+
+    // Execute the wrapper — this runs the user's statements for this cell.
+    auto *Fn = Sym->toPtr<void (*)()>();
+    Fn();
 
     // Success — this module becomes the most recent for import chaining.
     MostRecentModule = Result.Module;

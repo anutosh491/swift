@@ -78,6 +78,16 @@ public:
   /// Get the `ObjectTransformLayer` associated with this `SwiftJIT`
   llvm::orc::ObjectTransformLayer &getObjTransformLayer();
 
+  /// Add a compiled LLVM IR module to the main JITDylib.  All public symbols
+  /// in the module are registered and lazily compiled on first lookup.
+  llvm::Error addIRModule(llvm::orc::ThreadSafeModule TSM);
+
+  /// Look up a symbol in the main JITDylib by its *IR-level* (un-prefixed)
+  /// name, e.g. "$s8__repl_1AAyyF" for @convention(thin) () -> Void wrapper.
+  /// Triggers JIT compilation of the owning module on first call.
+  /// Returns the executor address of the symbol; call toPtr<FnTy>() on it.
+  llvm::Expected<llvm::orc::ExecutorAddr> lookup(llvm::StringRef Name);
+
   /// Initialize the main `JITDylib`, lookup the main symbol, execute it,
   /// deinitialize the main `JITDylib`, and return the exit code of the
   /// JIT'd program
