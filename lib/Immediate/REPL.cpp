@@ -121,6 +121,14 @@ typeCheckREPLInput(ModuleDecl *MostRecentModule, StringRef Name,
   // single __repl_N() function.  Pure-declaration inputs get an empty stub.
   FuncDecl *WrapperFD = wrapTopLevelCodeInFunction(*REPLInputFile, Name);
 
+  // AST transform: promote every declaration in this cell to public/open so
+  // the JIT can resolve them and later cells can reference them by name.
+  // Must run after wrapTopLevelCodeInFunction() so the synthesised wrapper
+  // function is also walked (it is already Public, so the walk is a no-op on
+  // it, but the user's own declarations — structs, classes, lets, vars — get
+  // their access raised here).
+  makeDeclarationsPublic(*REPLInputFile);
+
   return {REPLModule, REPLInputFile, WrapperFD};
 }
 

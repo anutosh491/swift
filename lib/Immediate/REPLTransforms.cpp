@@ -13,6 +13,7 @@
 #include "REPLTransforms.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTNode.h"
+#include "swift/AST/ASTWalker.h"
 #include "swift/AST/Attr.h"
 #include "swift/AST/Decl.h"
 #include "swift/AST/ParameterList.h"
@@ -101,4 +102,59 @@ FuncDecl *swift::wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName) 
          "wrapTopLevelCodeInFunction: all TopLevelCodeDecl nodes must be gone");
 
   return func;
+}
+
+void swift::makeDeclarationsPublic(SourceFile &SF) {
+  class Publicist : public ASTWalker {
+    /// Returns false for declarations whose access level must NOT be raised.
+    ///
+    /// Property-wrapper backing storage inside a struct gets a compiler-
+    /// synthesised memberwise initialiser whose parameter labels and types
+    /// are derived from the stored property access levels.  Overwriting those
+    /// access levels after synthesis breaks the initialiser, so we skip:
+    ///   - vars that have an attached property wrapper
+    ///   - vars that are the backing storage of a wrapped property
+    ///   - accessors whose storage falls into either category above
+    static bool canMakePublic(Decl *D) {
+      if (llvm::isa<StructDecl>(D->getDeclContext())) {
+        if (auto *var = llvm::dyn_cast<VarDecl>(D)) {
+          if (var->hasAttachedPropertyWrapper() ||
+              var->getOriginalWrappedProperty())
+            return false;
+          return true;
+        }
+        if (auto *accessor = llvm::dyn_cast<AccessorDecl>(D))
+          return canMakePublic(accessor->getStorage());
+      }
+      return true;
+    }
+
+    PreWalkAction walkToDeclPre(Decl *D) override {
+      if (!canMakePublic(D))
+        return Action::Continue();
+
+      if (auto *VD = llvm::dyn_cast<ValueDecl>(D)) {
+        // Default: public access so the JIT and later REPL cells can see it.
+        auto access = AccessLevel::Public;
+
+        // Non-final classes and syntactically overridable members (methods,
+        // properties, subscripts) should be 'open' so that later cells can
+        // subclass or override them — 'public' would block that.
+        if (llvm::isa<ClassDecl>(VD) || VD->isSyntacticallyOverridable()) {
+          if (!VD->isFinal())
+            access = AccessLevel::Open;
+        }
+
+        VD->overwriteAccess(access);
+        // Raise setter access in lockstep for stored/computed properties and
+        // subscripts so that 'var' declarations remain mutable from other cells.
+        if (auto *ASD = llvm::dyn_cast<AbstractStorageDecl>(D))
+          ASD->overwriteSetterAccess(access);
+      }
+      return Action::Continue();
+    }
+  };
+
+  Publicist p;
+  SF.walk(p);
 }

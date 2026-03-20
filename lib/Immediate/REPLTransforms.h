@@ -37,6 +37,18 @@ class SourceFile;
 /// linker-level symbol via SILDeclRef(result).mangle().
 FuncDecl *wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName);
 
+/// Walks all declarations in \p SF and promotes their access level to
+/// \c public (or \c open for non-final classes and syntactically overridable
+/// members).  This is required before SIL lowering so that the JIT can
+/// resolve every declaration emitted by previous REPL cells.
+///
+/// Property-wrapper backing variables inside structs are intentionally left
+/// alone because changing their access would break the implicit memberwise
+/// initialiser that the compiler synthesises for them.
+///
+/// Must be called after wrapTopLevelCodeInFunction() and before SIL lowering.
+void makeDeclarationsPublic(SourceFile &SF);
+
 } // end namespace swift
 
 #endif // SWIFT_IMMEDIATE_REPLTRANSFORMS_H
