@@ -1,7 +1,7 @@
 add_swift_host_library(swiftImmediate STATIC
   SwiftMaterializationUnit.cpp
   Immediate.cpp
-  REPL.cpp
+  Interpreter.cpp
   REPLTransforms.cpp
   LLVM_LINK_COMPONENTS
     executionengine

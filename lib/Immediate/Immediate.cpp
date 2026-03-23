@@ -16,6 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "swift/Immediate/Immediate.h"
+#include "swift/Immediate/Interpreter.h"
 #include "ImmediateImpl.h"
 #include "swift/Immediate/SwiftMaterializationUnit.h"
 
@@ -44,6 +45,9 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Transforms/IPO.h"
+
+#include <iostream>
+#include <string>
 
 // TODO: Replace pass manager
 //       Removed in: d623b2f95fd559901f008a0588dddd0949a8db01
@@ -438,4 +442,39 @@ int swift::RunImmediatelyFromAST(CompilerInstance &CI) {
   }
 
   return *Result;
+}
+
+// ── Interactive REPL entry point ─────────────────────────────────────────────
+//
+// This is the driver-facing entry point called by FrontendTool::performAction()
+// for the ActionType::REPL case.  Creates a swift::Interpreter and runs the
+// traditional read-eval-print loop.
+//
+// Embedders such as xeus-swift bypass this entirely: they construct a
+// swift::Interpreter directly and call parseAndExecute() per input cell.
+
+void swift::runREPL(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
+                    bool ParseStdlib) {
+  Interpreter Env(CI, CmdLine, ParseStdlib);
+  if (CI.getASTContext().hadError())
+    return;
+
+  llvm::outs() << "Welcome to Swift REPL.\n"
+               << "Type ':quit' to exit.\n\n";
+
+  std::string Line;
+  while (true) {
+    llvm::outs() << Env.getInputNumber() << "> ";
+
+    if (!std::getline(std::cin, Line))
+      break; // EOF (Ctrl+D)
+
+    if (llvm::StringRef(Line).trim().empty())
+      continue;
+
+    if (!Env.parseAndExecute(Line))
+      break;
+  }
+
+  llvm::outs() << "\n";
 }
