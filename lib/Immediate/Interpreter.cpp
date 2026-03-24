@@ -248,19 +248,19 @@ Interpreter::Interpreter(CompilerInstance &CI,
 
 Interpreter::~Interpreter() = default;
 
-bool Interpreter::parseAndExecute(llvm::StringRef Line) {
+Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
   ASTContext &Ctx = CI.getASTContext();
 
   // Bail out if JIT setup failed during construction.
   if (!JIT) {
     llvm::errs() << "REPL: JIT unavailable\n";
-    return false;
+    return REPLResult::Fatal;
   }
 
   // Check for quit commands.
   llvm::StringRef Trimmed = Line.trim();
   if (Trimmed == ":quit" || Trimmed == ":exit" || Trimmed == ":q")
-    return false;
+    return REPLResult::Fatal;
 
   // Reset error state from previous input.
   Ctx.Diags.resetHadAnyError();
@@ -276,9 +276,14 @@ bool Interpreter::parseAndExecute(llvm::StringRef Line) {
   auto Result = typeCheckREPLInput(MostRecentModule, Name, std::move(Buffer));
 
   if (Ctx.hadError()) {
-    // Non-fatal error: reset and let the user try again.
+    // Non-fatal compile error (type-check failure etc.).
+    // Diagnostics have already been emitted to any registered consumers.
+    // Flush them now so the Swift-style PrintingDiagnosticConsumer releases
+    // any output queued in DiagnosticBridge (it normally waits for the next
+    // error before printing, which causes delayed output in a REPL).
     Ctx.Diags.resetHadAnyError();
-    return true;
+    Ctx.Diags.flushConsumers();
+    return REPLResult::CompileError;
   }
 
   // Autolink any libraries introduced by this cell's imports (e.g.
@@ -298,14 +303,16 @@ bool Interpreter::parseAndExecute(llvm::StringRef Line) {
 
   if (runSILDiagnosticPasses(*SILMod) || Ctx.hadError()) {
     Ctx.Diags.resetHadAnyError();
-    return true;
+    Ctx.Diags.flushConsumers();
+    return REPLResult::CompileError;
   }
 
   runSILLoweringPasses(*SILMod);
 
   if (Ctx.hadError()) {
     Ctx.Diags.resetHadAnyError();
-    return true;
+    Ctx.Diags.flushConsumers();
+    return REPLResult::CompileError;
   }
 
   // ── Step 6: IRGen ─────────────────────────────────────────────────────
@@ -320,7 +327,8 @@ bool Interpreter::parseAndExecute(llvm::StringRef Line) {
 
   if (Ctx.hadError()) {
     Ctx.Diags.resetHadAnyError();
-    return true;
+    Ctx.Diags.flushConsumers();
+    return REPLResult::CompileError;
   }
   assert(GenModule && "IR generation succeeded without emitting a module?");
 
@@ -331,20 +339,21 @@ bool Interpreter::parseAndExecute(llvm::StringRef Line) {
 
   if (Ctx.hadError()) {
     Ctx.Diags.resetHadAnyError();
-    return true;
+    Ctx.Diags.flushConsumers();
+    return REPLResult::CompileError;
   }
 
   // ── Step 7: JIT add + execute ─────────────────────────────────────────
   auto TSM = std::move(GenModule).intoThreadSafeContext();
   if (auto Err = JIT->addIRModule(std::move(TSM))) {
     logAllUnhandledErrors(std::move(Err), llvm::errs());
-    return true;
+    return REPLResult::CompileError;
   }
 
   auto Sym = JIT->lookup(SILMangledName);
   if (!Sym) {
     logAllUnhandledErrors(Sym.takeError(), llvm::errs());
-    return true;
+    return REPLResult::CompileError;
   }
 
   auto *Fn = Sym->toPtr<void (*)()>();
@@ -352,5 +361,5 @@ bool Interpreter::parseAndExecute(llvm::StringRef Line) {
 
   MostRecentModule = Result.Module;
   ++InputNumber;
-  return true;
+  return REPLResult::Success;
 }

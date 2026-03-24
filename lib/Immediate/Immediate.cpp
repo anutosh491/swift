@@ -472,7 +472,7 @@ void swift::runREPL(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
     if (llvm::StringRef(Line).trim().empty())
       continue;
 
-    if (!Env.parseAndExecute(Line))
+    if (Env.parseAndExecute(Line) == swift::Interpreter::REPLResult::Fatal)
       break;
   }
 

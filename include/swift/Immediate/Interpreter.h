@@ -74,10 +74,21 @@ public:
   /// Returns true if the JIT session was successfully initialised.
   bool isReady() const { return (bool)JIT; }
 
+  /// Outcome of a single parseAndExecute call.
+  enum class REPLResult {
+    /// Cell was parsed, compiled, and JIT-executed without errors.
+    Success,
+    /// Non-fatal compile/type-check/SIL error.  The session continues; the
+    /// caller should surface the diagnostic text to the user.
+    CompileError,
+    /// The session must end (:quit command or unrecoverable JIT failure).
+    Fatal,
+  };
+
   /// Parse and JIT-execute one input cell.
   ///
-  /// \returns true to continue the session, false to quit (e.g. ':quit').
-  bool parseAndExecute(llvm::StringRef Line);
+  /// \returns the outcome — Success, CompileError, or Fatal.
+  REPLResult parseAndExecute(llvm::StringRef Line);
 };
 
 } // namespace swift
