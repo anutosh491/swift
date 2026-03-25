@@ -28,6 +28,8 @@
 #include "swift/Immediate/Immediate.h"   // ProcessCmdLine
 #include "llvm/ADT/StringRef.h"
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace swift {
 class CompilerInstance;
@@ -74,6 +76,23 @@ public:
   /// Returns true if the JIT session was successfully initialised.
   bool isReady() const { return (bool)JIT; }
 
+  /// Result of an input-completeness check.
+  struct InputCompleteness {
+    /// True if the input is syntactically complete and ready to execute.
+    bool IsComplete;
+    /// Leading whitespace of the line containing the last unbalanced opener
+    /// ('{'/'('/'[').  Clients use this as the base indentation prefix.
+    std::string IndentPrefix;
+    /// Number of additional indent levels beyond IndentPrefix.
+    uint32_t IndentLevel;
+  };
+
+  /// Check whether \p Text is syntactically complete (all brackets balanced,
+  /// no dangling expression).  Used by the REPL loop to decide whether to
+  /// show a continuation prompt instead of executing immediately, and by
+  /// Jupyter kernels to implement the is_complete_request handler.
+  InputCompleteness isInputComplete(llvm::StringRef Text) const;
+
   /// Outcome of a single parseAndExecute call.
   enum class REPLResult {
     /// Cell was parsed, compiled, and JIT-executed without errors.
@@ -89,6 +108,25 @@ public:
   ///
   /// \returns the outcome — Success, CompileError, or Fatal.
   REPLResult parseAndExecute(llvm::StringRef Line);
+
+  /// One-shot code-completion result for an embedding UI (e.g. Jupyter).
+  ///
+  /// \p Matches contains the full insertable strings (prefix typed by the
+  /// user + completion suffix), e.g. \c "remove(at:" from \c "remov".
+  /// \p Prefix is the partial identifier the user typed; callers use
+  /// \c cursor_start = cursor_pos - Prefix.size() to define the replacement
+  /// region passed back to the Jupyter \c complete_reply.
+  struct CompletionResult {
+    std::vector<std::string> Matches;
+    std::string Prefix;
+  };
+
+  /// Compute completions for \p Code (text up to the cursor).
+  ///
+  /// Uses Swift's REPL code-completion engine internally.  Safe to call at any
+  /// point in the session; diagnostics generated during completion are
+  /// suppressed and do not affect subsequent executions.
+  CompletionResult complete(llvm::StringRef Code) const;
 };
 
 } // namespace swift

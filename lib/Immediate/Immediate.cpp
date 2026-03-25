@@ -462,18 +462,38 @@ void swift::runREPL(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
   llvm::outs() << "Welcome to Swift REPL.\n"
                << "Type ':quit' to exit.\n\n";
 
+  std::string AccumulatedInput;
   std::string Line;
   while (true) {
-    llvm::outs() << Env.getInputNumber() << "> ";
+    // Show the primary prompt when starting a new cell, continuation prompt
+    // when awaiting more input for an incomplete statement.
+    if (AccumulatedInput.empty())
+      llvm::outs() << Env.getInputNumber() << "> ";
+    else
+      llvm::outs() << "  ... ";
+    llvm::outs().flush();
 
     if (!std::getline(std::cin, Line))
       break; // EOF (Ctrl+D)
 
-    if (llvm::StringRef(Line).trim().empty())
+    // Skip blank lines only at the start of a new cell.
+    if (AccumulatedInput.empty() && llvm::StringRef(Line).trim().empty())
       continue;
 
-    if (Env.parseAndExecute(Line) == swift::Interpreter::REPLResult::Fatal)
+    AccumulatedInput += Line;
+    AccumulatedInput += "\n";
+
+    // Check whether the accumulated text forms a complete Swift statement.
+    // If not, show the continuation prompt and wait for more input.
+    auto Completeness = Env.isInputComplete(AccumulatedInput);
+    if (!Completeness.IsComplete)
+      continue;
+
+    if (Env.parseAndExecute(AccumulatedInput) ==
+        swift::Interpreter::REPLResult::Fatal)
       break;
+
+    AccumulatedInput.clear();
   }
 
   llvm::outs() << "\n";

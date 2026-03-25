@@ -24,6 +24,9 @@
 #include "swift/AST/SourceFile.h"
 #include "swift/AST/TBDGenRequests.h"
 #include "swift/Frontend/Frontend.h"
+#include "swift/AST/DiagnosticSuppression.h"
+#include "swift/IDE/REPLCodeCompletion.h"
+#include "swift/IDE/Utils.h"
 #include "swift/SIL/SILDeclRef.h"
 #include "swift/Subsystems.h"
 #include "swift/SILOptimizer/PassManager/Passes.h"
@@ -247,6 +250,52 @@ Interpreter::Interpreter(CompilerInstance &CI,
 }
 
 Interpreter::~Interpreter() = default;
+
+Interpreter::InputCompleteness
+Interpreter::isInputComplete(llvm::StringRef Text) const {
+  // Use the Swift parser to determine whether Text is syntactically complete.
+  // isSourceInputComplete() creates a throwaway ParserUnit, runs the parser
+  // on Text, and returns whether any bracket/brace/paren is still open.
+  const auto &LangOpts = CI.getASTContext().LangOpts;
+  auto Result =
+      ide::isSourceInputComplete(Text, SourceFileKind::REPL, LangOpts);
+  return {Result.IsComplete, Result.IndentPrefix, Result.IndentLevel};
+}
+
+Interpreter::CompletionResult
+Interpreter::complete(llvm::StringRef Code) const {
+  // Suppress diagnostics for the duration of this call so that partial/
+  // erroneous input during a completion probe does not surface as errors.
+  DiagnosticSuppression Suppression(CI.getASTContext().Diags);
+
+  // Pass a source file from MostRecentModule — not CI.getMainModule() — so
+  // that declarations from previously-executed cells are in scope.  Each cell
+  // module imports the previous one (see typeCheckREPLInput), so
+  // MostRecentModule has transitive access to all prior declarations.
+  SourceFile *SF = nullptr;
+  for (auto *F : MostRecentModule->getFiles()) {
+    if (auto *Src = llvm::dyn_cast<SourceFile>(F)) {
+      SF = Src;
+      break;
+    }
+  }
+  if (!SF)
+    return {};
+
+  swift::REPLCompletions Completions;
+  Completions.populate(*SF, Code);
+
+  CompletionResult Result;
+  Result.Prefix = Completions.getPrefix().str();
+
+  // Build fully-insertable completion strings: prefix typed by the user +
+  // the suffix recommended by the engine.
+  llvm::StringRef Prefix = Completions.getPrefix();
+  for (auto &Cooked : Completions.getCookedResults())
+    Result.Matches.push_back((Prefix + Cooked.InsertableString).str());
+
+  return Result;
+}
 
 Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
   ASTContext &Ctx = CI.getASTContext();

@@ -110,6 +110,14 @@ public:
     return CompletionStrings;
   }
 
+  /// The partial identifier the user typed that all completions share as a
+  /// common prefix.  Empty if the cursor is right after a '.' or '('.
+  StringRef getPrefix() const { return Prefix; }
+
+  /// All completion results (insertable suffix after prefix + bytes to erase).
+  /// Prefer this over repeatedly calling getNextStem() in one-shot UIs.
+  ArrayRef<CookedResult> getCookedResults() const { return CookedResults; }
+
   /// Reset the completion set to an invalid state.
   void reset();
 };
