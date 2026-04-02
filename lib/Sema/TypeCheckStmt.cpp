@@ -2167,8 +2167,10 @@ void StmtChecker::typeCheckASTNode(ASTNode &node) {
     auto &ctx = DC->getASTContext();
 
     TypeCheckExprOptions options = TypeCheckExprFlags::IsExprStmt;
+    auto *SF = DC->getParentSourceFile();
     bool isDiscarded =
-        (!ctx.LangOpts.Playground && !ctx.LangOpts.DebuggerSupport);
+        (!ctx.LangOpts.Playground && !ctx.LangOpts.DebuggerSupport &&
+         !(SF && SF->Kind == SourceFileKind::REPL));
     if (isDiscarded)
       options |= TypeCheckExprFlags::IsDiscarded;
 

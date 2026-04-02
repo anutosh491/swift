@@ -318,10 +318,15 @@ Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
   SmallString<16> Name;
   llvm::raw_svector_ostream(Name) << "__repl_" << InputNumber;
 
-  // Create a memory buffer for the input.
+  // Typecheck the original input.  After typeChecking,
+  // wrapTopLevelCodeInFunction has already run and populated the wrapper body:
+  //   - declarations (let/func/struct/…) → empty wrapper body
+  //   - void-returning calls (print(x)) → wrapper body has a ()-typed Expr*
+  //   - bare value expressions (1+1, x) → wrapper body has a non-Void Expr*
+  // This lets us cheaply detect the auto-print case without a speculative
+  // probe typecheck on every declaration the user enters.
+  bool IsBareExpr = false;
   auto Buffer = llvm::MemoryBuffer::getMemBufferCopy(Line, Name);
-
-  // Parse and type-check.
   auto Result = typeCheckREPLInput(MostRecentModule, Name, std::move(Buffer));
 
   if (Ctx.hadError()) {
@@ -333,6 +338,29 @@ Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
     Ctx.Diags.resetHadAnyError();
     Ctx.Diags.flushConsumers();
     return REPLResult::CompileError;
+  }
+
+  // If the wrapper body has a single non-Void expression, re-typecheck with
+  // auto-print injected so the result is displayed to the user.
+  if (hasSingleNonVoidBareExpr(Result.WrapperFunc)) {
+    std::string WrappedInput;
+    llvm::raw_string_ostream WOS(WrappedInput);
+    WOS << "let __repl_r" << ResultIdx << " = (" << Line << ")\n";
+    WOS << "Swift.print(\"$R" << ResultIdx
+        << ": \\(Swift.type(of: __repl_r" << ResultIdx << ")) = "
+        << "\\(String(reflecting: __repl_r" << ResultIdx << "))\")";
+
+    DiagnosticSuppression Suppress(Ctx.Diags);
+    Ctx.Diags.resetHadAnyError();
+    auto WrappedBuf =
+        llvm::MemoryBuffer::getMemBufferCopy(WrappedInput, Name);
+    auto Wrapped =
+        typeCheckREPLInput(MostRecentModule, Name, std::move(WrappedBuf));
+    if (!Ctx.hadError()) {
+      Result = Wrapped;
+      IsBareExpr = true;
+    }
+    Ctx.Diags.resetHadAnyError();
   }
 
   // Autolink any libraries introduced by this cell's imports (e.g.
@@ -409,6 +437,11 @@ Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
   Fn();
 
   MostRecentModule = Result.Module;
+
+  if (IsBareExpr)
+    ++ResultIdx;
+
   ++InputNumber;
+  Ctx.Diags.flushConsumers();
   return REPLResult::Success;
 }

@@ -16,6 +16,7 @@
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/Attr.h"
 #include "swift/AST/Decl.h"
+#include "swift/AST/Expr.h"
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/SourceFile.h"
 #include "swift/AST/Stmt.h"
@@ -157,4 +158,15 @@ void swift::makeDeclarationsPublic(SourceFile &SF) {
 
   Publicist p;
   SF.walk(p);
+}
+
+bool swift::hasSingleNonVoidBareExpr(FuncDecl *WrapperFunc) {
+  auto *Body = WrapperFunc->getBody();
+  if (!Body || Body->getNumElements() != 1)
+    return false;
+  auto *E = Body->getElements()[0].dyn_cast<Expr *>();
+  if (!E)
+    return false;
+  auto Ty = E->getType();
+  return Ty && !Ty->hasError() && !Ty->isVoid();
 }

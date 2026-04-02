@@ -58,6 +58,8 @@ class Interpreter {
   CompilerInstance &CI;
   ModuleDecl *MostRecentModule;
   unsigned InputNumber = 1;
+  /// Counter for auto-printed result variables ($R0, $R1, …).
+  unsigned ResultIdx = 0;
   /// Long-lived JIT session -- all cells share the same JITDylib.
   std::unique_ptr<SwiftJIT> JIT;
 

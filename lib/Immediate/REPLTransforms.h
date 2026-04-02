@@ -49,6 +49,18 @@ FuncDecl *wrapTopLevelCodeInFunction(SourceFile &SF, StringRef funcName);
 /// Must be called after wrapTopLevelCodeInFunction() and before SIL lowering.
 void makeDeclarationsPublic(SourceFile &SF);
 
+/// Returns true if \p WrapperFunc's body contains exactly one expression
+/// whose post-typecheck type is non-Void and error-free.
+///
+/// This is the cheapest possible test for "was this REPL input a bare
+/// value-producing expression?": after wrapTopLevelCodeInFunction() has run,
+/// declarations produce an empty wrapper body, void-returning calls produce a
+/// ()-typed expression, and bare value expressions (e.g. \c 1+1, \c x)
+/// produce a single non-Void Expr*.
+///
+/// Must be called after type-checking and wrapTopLevelCodeInFunction().
+bool hasSingleNonVoidBareExpr(FuncDecl *WrapperFunc);
+
 } // end namespace swift
 
 #endif // SWIFT_IMMEDIATE_REPLTRANSFORMS_H
