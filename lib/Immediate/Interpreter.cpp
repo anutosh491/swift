@@ -25,13 +25,16 @@
 #include "swift/AST/TBDGenRequests.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/AST/DiagnosticSuppression.h"
+#include "swift/Basic/InitializeSwiftModules.h"
 #include "swift/IDE/REPLCodeCompletion.h"
 #include "swift/IDE/Utils.h"
+#include "swift/SIL/SILBridging.h"
 #include "swift/SIL/SILDeclRef.h"
 #include "swift/Subsystems.h"
 #include "swift/SILOptimizer/PassManager/Passes.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
+#include <mutex>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -44,8 +47,6 @@
 #include <string>
 
 using namespace swift;
-
-// ── File-private helpers ─────────────────────────────────────────────────────
 
 /// Result of type-checking a single REPL input cell.
 struct REPLInputResults {
@@ -141,6 +142,21 @@ Interpreter::Interpreter(CompilerInstance &CI,
                          const ProcessCmdLine &CmdLine,
                          bool ParseStdlib)
     : CI(CI), MostRecentModule(CI.getMainModule()) {
+
+  // Ensure Swift-in-Swift optimizer passes (e.g. LifetimeCompletion,
+  // SILGenCleanup utilities) are registered exactly once per process.
+  // In the standalone swift-frontend binary this is called from driver.cpp,
+  // but when Interpreter is used as a library (xeus-swift kernel) no driver
+  // startup code runs, so we must call it here.
+  // Guard with swiftModulesInitialized() so we don't double-register when
+  // driver.cpp has already called initializeSwiftModules() before us.
+  {
+    static std::once_flag s_initSwiftModulesOnce;
+    std::call_once(s_initSwiftModulesOnce, []() {
+      if (!swiftModulesInitialized())
+        initializeSwiftModules();
+    });
+  }
 
   ASTContext &Ctx = CI.getASTContext();
   const auto &IRGenOpts = CI.getInvocation().getIRGenOptions();
