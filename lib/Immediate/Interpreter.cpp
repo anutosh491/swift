@@ -313,6 +313,24 @@ Interpreter::complete(llvm::StringRef Code) const {
   return Result;
 }
 
+void Interpreter::setLastValueDisplayFunc(std::string funcName) {
+  DisplayFunc = std::move(funcName);
+}
+
+bool Interpreter::loadLibrary(llvm::StringRef path) {
+#if defined(_WIN32)
+  if (LoadLibraryA(path.str().c_str()))
+    return true;
+  llvm::errs() << "Interpreter::loadLibrary: failed to load '" << path << "'\n";
+  return false;
+#else
+  if (dlopen(path.str().c_str(), RTLD_LAZY | RTLD_GLOBAL))
+    return true;
+  llvm::errs() << "Interpreter::loadLibrary: " << dlerror() << "\n";
+  return false;
+#endif
+}
+
 Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
   ASTContext &Ctx = CI.getASTContext();
 
@@ -358,14 +376,30 @@ Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
 
   // If the wrapper body has a single non-Void expression, re-typecheck with
   // auto-print injected so the result is displayed to the user.
+  //
+  // If the embedder registered a last-value display function via
+  // setLastValueDisplayFunc(name), call it instead of Swift.print.  The
+  // function must provide two overloads — one constrained on the rich-display
+  // protocol, one unconstrained fallback — so Swift resolves the correct one at
+  // typecheck time (concrete type is always known in the wrapper).  If the
+  // function is not yet in scope, DiagnosticSuppression discards the typecheck
+  // error and the expression executes without output.
   if (hasSingleNonVoidBareExpr(Result.WrapperFunc)) {
     std::string WrappedInput;
     llvm::raw_string_ostream WOS(WrappedInput);
     WOS << "let __repl_r" << ResultIdx << " = (" << Line << ")\n";
-    WOS << "Swift.print(\"$R" << ResultIdx
-        << ": \\(Swift.type(of: __repl_r" << ResultIdx << ")) = "
-        << "\\(String(reflecting: __repl_r" << ResultIdx << "))\")";
-
+    if (!DisplayFunc.empty()) {
+      // Call the two-overload display function.  Swift resolves the correct
+      // overload — constrained (rich display) or unconstrained (Swift.print
+      // fallback) — at typecheck time.  No runtime conformance lookup, no
+      // as? cast, no extra pass.
+      WOS << DisplayFunc << "(__repl_r" << ResultIdx
+          << ", \"$R" << ResultIdx << "\")";
+    } else {
+      WOS << "Swift.print(\"$R" << ResultIdx
+          << ": \\(Swift.type(of: __repl_r" << ResultIdx << ")) = "
+          << "\\(String(reflecting: __repl_r" << ResultIdx << "))\")";
+    }
     DiagnosticSuppression Suppress(Ctx.Diags);
     Ctx.Diags.resetHadAnyError();
     auto WrappedBuf =

@@ -62,6 +62,9 @@ class Interpreter {
   unsigned ResultIdx = 0;
   /// Long-lived JIT session -- all cells share the same JITDylib.
   std::unique_ptr<SwiftJIT> JIT;
+  /// Swift function called for last-value auto-display (e.g. "_xeusAutoDisplay").
+  /// Empty string means use the default Swift.print behaviour.
+  std::string DisplayFunc;
 
 public:
   Interpreter(CompilerInstance &CI, const ProcessCmdLine &CmdLine,
@@ -105,6 +108,50 @@ public:
     /// The session must end (:quit command or unrecoverable JIT failure).
     Fatal,
   };
+
+  /// Register a Swift function name for last-value auto-display.
+  ///
+  /// When set, auto-print generates:
+  /// \code
+  ///   let __repl_rN = (expr)
+  ///   funcName(__repl_rN, "$RN")
+  /// \endcode
+  ///
+  /// The function must be defined with two overloads — one constrained on the
+  /// rich-display protocol, one unconstrained fallback:
+  /// \code
+  ///   // Rich display for MimeBundleRepresentable (or any protocol):
+  ///   public func funcName<T: Protocol>(_ v: T, _ label: String) { v.method() }
+  ///   // Plain fallback for every other type:
+  ///   public func funcName<T>(_ v: T, _ label: String) { Swift.print(...) }
+  /// \endcode
+  ///
+  /// Swift resolves the correct overload at typecheck time (concrete type
+  /// is always known in the auto-print wrapper) — no runtime conformance
+  /// lookup, no \c as? cast, no existential boxing overhead.
+  ///
+  /// If \p funcName is not yet in scope at typecheck time, the wrapped
+  /// typecheck fails silently (DiagnosticSuppression) and the expression
+  /// runs with no output — safe fallback.
+  ///
+  /// Pass an empty string to restore the default \c Swift.print behaviour.
+  void setLastValueDisplayFunc(std::string funcName);
+
+  /// Load a dynamic library into the process at runtime.
+  ///
+  /// Analogous to \c clang::Interpreter::LoadDynamicLibrary.  Calls
+  /// \c dlopen(path, RTLD_LAZY | RTLD_GLOBAL) so the library's symbols become
+  /// visible to the \c DynamicLibrarySearchGenerator on the next JIT link step.
+  ///
+  /// Use this for pure-C dylibs (no .swiftmodule) or as an escape hatch for
+  /// libraries whose .swiftmodule lacks \c -module-link-name metadata.
+  /// For well-built Swift modules, prefer passing \c -L to the kernel so that
+  /// \c autolinkImportedModules resolves the library automatically on
+  /// \c import.
+  ///
+  /// \returns \c true on success, \c false if \c dlopen failed (message on
+  ///          stderr).
+  bool loadLibrary(llvm::StringRef path);
 
   /// Parse and JIT-execute one input cell.
   ///
