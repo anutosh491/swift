@@ -30,6 +30,7 @@
 #include "swift/IDE/Utils.h"
 #include "swift/SIL/SILBridging.h"
 #include "swift/SIL/SILDeclRef.h"
+#include "swift/SIL/SILModule.h"
 #include "swift/Subsystems.h"
 #include "swift/SILOptimizer/PassManager/Passes.h"
 #include "llvm/Support/Error.h"
@@ -429,6 +430,35 @@ Interpreter::REPLResult Interpreter::parseAndExecute(llvm::StringRef Line) {
                                    CI.getSILOptions());
 
   if (runSILDiagnosticPasses(*SILMod) || Ctx.hadError()) {
+    Ctx.Diags.resetHadAnyError();
+    Ctx.Diags.flushConsumers();
+    return REPLResult::CompileError;
+  }
+
+  // Run SIL performance optimizations when the user asked for them (-O / -Osize).
+  // Must run BEFORE runSILLoweringPasses: the perf pipeline (PerformanceSILLinker,
+  // inlining, generic specialisation, ARC elimination, etc.) operates on
+  // canonical SIL and tries to deserialize function bodies from imported modules.
+  // runSILLoweringPasses advances the module stage to Lowered; after that point
+  // SILDeserializer refuses to load any more SIL into the module
+  // ("cannot deserialize into a module that has entered Lowered stage").
+  //
+  // Correct order mirrors performCompileStepsPostSILGen in the real compiler:
+  //   runSILDiagnosticPasses  → runSILOptimizationPasses → runSILLoweringPasses
+  //
+  // LLDB's SwiftExpressionParser hardcodes NoOptimization unconditionally;
+  // this block is what gives our ORC JIT REPL a concrete performance advantage
+  // over the LLDB REPL when -O is requested.
+  if (CI.getSILOptions().shouldOptimize()) {
+    // The full performance pipeline contains a SerializeSILPass that asserts a
+    // serialization action is set — that action exists only in whole-module
+    // compilation, not in JIT mode.  Install a no-op callback so the pass
+    // runs (and safely does nothing) instead of crashing.
+    SILMod->setSerializeSILAction([](){});
+    runSILOptimizationPasses(*SILMod);
+  }
+
+  if (Ctx.hadError()) {
     Ctx.Diags.resetHadAnyError();
     Ctx.Diags.flushConsumers();
     return REPLResult::CompileError;
