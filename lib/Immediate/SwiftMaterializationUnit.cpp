@@ -142,6 +142,15 @@ llvm::orc::ObjectTransformLayer &SwiftJIT::getObjTransformLayer() {
   return J->getObjTransformLayer();
 }
 
+llvm::Error SwiftJIT::addIRModule(llvm::orc::ThreadSafeModule TSM) {
+  return J->addIRModule(J->getMainJITDylib(), std::move(TSM));
+}
+
+llvm::Expected<llvm::orc::ExecutorAddr>
+SwiftJIT::lookup(llvm::StringRef Name) {
+  return J->lookup(Name);
+}
+
 llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>>
 SwiftJIT::CreateLLJIT(CompilerInstance &CI) {
   llvm::TargetOptions TargetOpt;

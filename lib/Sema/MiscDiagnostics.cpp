@@ -6120,7 +6120,8 @@ static void diagnoseExplicitUseOfLazyVariableStorage(const Expr *E,
         return;
       }
       if (sourceFileKind->Kind != SourceFileKind::Library &&
-          sourceFileKind->Kind != SourceFileKind::Main) {
+          sourceFileKind->Kind != SourceFileKind::Main &&
+          sourceFileKind->Kind != SourceFileKind::REPL) {
         return;
       }
       if (VD->isLazyStorageProperty()) {

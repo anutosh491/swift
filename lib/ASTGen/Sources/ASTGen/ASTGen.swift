@@ -81,7 +81,7 @@ struct ASTGenVisitor {
       }
 
       // Diagnose top-level code in non-script files.
-      if !declContext.parentSourceFile.isScriptMode {
+      if !declContext.parentSourceFile.allowsTopLevelCode {
         switch astNode.kind {
         case .stmt:
           self.diagnose(.illegalTopLevelStmt(node))
@@ -132,7 +132,7 @@ struct ASTGenVisitor {
           }
 
           // In non-script files, macro expansion at top-level must be a decl.
-          if !declContext.parentSourceFile.isScriptMode {
+          if !declContext.parentSourceFile.allowsTopLevelCode {
             return withDeclContext(parentDC) {
               return .decl(self.generateMacroExpansionDecl(macroExpansionExpr: node).asDecl)
             }
