@@ -70,7 +70,14 @@ func _deallocateUninitializedArray<Element>(
 }
 
 #if !INTERNAL_CHECKS_ENABLED
+// On wasm32/Emscripten, mandatory inlining is disabled so @_alwaysEmitIntoClient
+// functions are never emitted into SIDE_MODULE cells. Use @inlinable to export
+// a real library symbol from libswiftCore.so that cells can dlopen-resolve.
+#if arch(wasm32)
+@inlinable
+#else
 @_alwaysEmitIntoClient
+#endif
 @_semantics("array.finalize_intrinsic")
 @_effects(readnone)
 @_effects(escaping array.value** => return.value**)
@@ -86,7 +93,12 @@ func _finalizeUninitializedArray<Element>(
 #else
 // When asserts are enabled, _endCOWMutation writes to _native.isImmutable
 // So we cannot have @_effects(readnone)
+// On wasm32/Emscripten, use @inlinable to export a library symbol (see above).
+#if arch(wasm32)
+@inlinable
+#else
 @_alwaysEmitIntoClient
+#endif
 @_semantics("array.finalize_intrinsic")
 public // COMPILER_INTRINSIC
 func _finalizeUninitializedArray<Element>(

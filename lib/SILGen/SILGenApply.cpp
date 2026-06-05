@@ -6901,8 +6901,12 @@ ManagedValue SILGenFunction::emitInjectEnum(SILLocation loc,
 }
 
 RValue SILGenFunction::emitApplyExpr(ApplyExpr *e, SGFContext c) {
+  // llvm::outs() << "[SILGen] CallEmission::forApplyExpr...\n"; llvm::outs().flush();
   CallEmission emission = CallEmission::forApplyExpr(*this, e);
-  return emission.apply(c);
+  // llvm::outs() << "[SILGen] forApplyExpr done, emission.apply...\n"; llvm::outs().flush();
+  auto result = emission.apply(c);
+  // llvm::outs() << "[SILGen] emission.apply done\n"; llvm::outs().flush();
+  return result;
 }
 
 RValue
@@ -7150,14 +7154,20 @@ RValue SILGenFunction::emitLiteral(LiteralExpr *literal, SGFContext C) {
     builtinInit = literal->getInitializer();
   }
 
+  // llvm::outs() << "[SILGen] emitLiteral: kind=" << (int)literal->getKind()
+  //              << " type=" << literal->getType().getString()
+  //              << " hasInit=" << (bool)init << "\n"; llvm::outs().flush();
+
   // Emit the raw, builtin literal arguments.
   PreparedArguments builtinLiteralArgs =
       buildBuiltinLiteralArgs(*this, C, literal);
 
+  // llvm::outs() << "[SILGen] emitApplyAllocatingInitializer (builtinInit)\n"; llvm::outs().flush();
   // Call the builtin initializer.
   RValue builtinResult = emitApplyAllocatingInitializer(
       literal, builtinInit, std::move(builtinLiteralArgs), Type(),
       init ? SGFContext() : C);
+  // llvm::outs() << "[SILGen] emitApplyAllocatingInitializer done\n"; llvm::outs().flush();
 
   // If we were able to directly initialize the literal we wanted, we're done.
   if (!init)
@@ -7168,9 +7178,11 @@ RValue SILGenFunction::emitLiteral(LiteralExpr *literal, SGFContext C) {
   PreparedArguments args((AnyFunctionType::Param(ty)));
   args.add(literal, std::move(builtinResult));
 
+  // llvm::outs() << "[SILGen] emitApplyAllocatingInitializer (init)\n"; llvm::outs().flush();
   RValue result = emitApplyAllocatingInitializer(literal, init,
                                                  std::move(args),
                                                  literal->getType(), C);
+  // llvm::outs() << "[SILGen] emitApplyAllocatingInitializer (init) done\n"; llvm::outs().flush();
   return result;
 }
 

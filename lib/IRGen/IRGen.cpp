@@ -1614,9 +1614,14 @@ GeneratedModule IRGenRequest::evaluate(Evaluator &evaluator,
   auto SILModuleRelease = [&SILMod]() {
     SILMod.reset(nullptr);
   };
+#ifdef __EMSCRIPTEN__
+  // wasm without pthreads: std::thread constructor throws.  Release inline.
+  SILModuleRelease();
+#else
   auto Thread = std::thread(SILModuleRelease);
   // Wait for the thread to terminate.
   SWIFT_DEFER { Thread.join(); };
+#endif
 
   embedBitcode(IGM.getModule(), Opts);
 

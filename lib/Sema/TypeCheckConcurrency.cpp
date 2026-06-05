@@ -74,6 +74,7 @@ static bool shouldInferAttributeInContext(const DeclContext *dc) {
         case SourceFileKind::MacroExpansion:
         case SourceFileKind::Main:
         case SourceFileKind::SIL:
+        case SourceFileKind::REPL:
           return true;
         }
       }
@@ -924,6 +925,7 @@ static bool shouldDiagnosePreconcurrencyImports(SourceFile &sf) {
   case SourceFileKind::Library:
   case SourceFileKind::Main:
   case SourceFileKind::MacroExpansion:
+  case SourceFileKind::REPL:
       return true;
   }
 }
@@ -7729,6 +7731,7 @@ ProtocolConformance *swift::deriveImplicitSendableConformance(
         case SourceFileKind::MacroExpansion:
         case SourceFileKind::Main:
         case SourceFileKind::SIL:
+        case SourceFileKind::REPL:
           break;
         }
       }

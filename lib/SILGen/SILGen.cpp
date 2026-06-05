@@ -475,6 +475,8 @@ FuncDecl *SILGenModule::getExit() {
     mostLikelyIdentifier = C.getIdentifier("Darwin");
   } else if (triple.isOSWASI()) {
     mostLikelyIdentifier = C.getIdentifier("SwiftWASILibc");
+  } else if (triple.isOSEmscripten()) {
+    mostLikelyIdentifier = C.getIdentifier("SwiftEmscriptenLibc");
   } else if (triple.isWindowsMSVCEnvironment()) {
     mostLikelyIdentifier = C.getIdentifier("ucrt");
   } else {
@@ -904,7 +906,11 @@ static bool isInPrintFunctionList(AbstractFunctionDecl *fd) {
   return false;
 }
 
-void SILGenModule::visitFuncDecl(FuncDecl *fd) { emitFunction(fd); }
+void SILGenModule::visitFuncDecl(FuncDecl *fd) {
+  // llvm::outs() << "[SILGen] visitFuncDecl: " << fd->getName() << "\n"; llvm::outs().flush();
+  emitFunction(fd);
+  // llvm::outs() << "[SILGen] visitFuncDecl done: " << fd->getName() << "\n"; llvm::outs().flush();
+}
 
 void SILGenModule::emitFunctionDefinition(SILDeclRef constant, SILFunction *f) {
   if (!f->empty()) {
@@ -1016,10 +1022,13 @@ void SILGenModule::emitFunctionDefinition(SILDeclRef constant, SILFunction *f) {
 
     auto *fd = cast<FuncDecl>(constant.getDecl());
 
+    // llvm::outs() << "[SILGen] preEmitFunction: " << f->getName() << "\n"; llvm::outs().flush();
     preEmitFunction(constant, f, fd);
     PrettyStackTraceSILFunction X("silgen emitFunction", f);
     f->createProfiler(constant);
+    // llvm::outs() << "[SILGen] SILGenFunction::emitFunction: " << f->getName() << "\n"; llvm::outs().flush();
     SILGenFunction(*this, *f, fd).emitFunction(fd);
+    // llvm::outs() << "[SILGen] SILGenFunction::emitFunction done\n"; llvm::outs().flush();
     postEmitFunction(constant, f);
     break;
   }
@@ -1589,11 +1598,16 @@ void SILGenModule::emitFunction(FuncDecl *fd) {
 
   SILDeclRef::Loc decl = fd;
 
+  // llvm::outs() << "[SILGen] emitAbstractFuncDecl: " << fd->getName() << "\n"; llvm::outs().flush();
   emitAbstractFuncDecl(fd);
+  // llvm::outs() << "[SILGen] emitAbstractFuncDecl done\n"; llvm::outs().flush();
 
   if (shouldEmitFunctionBody(fd)) {
+    // llvm::outs() << "[SILGen] setCaptureTypeExpansionContext\n"; llvm::outs().flush();
     Types.setCaptureTypeExpansionContext(SILDeclRef(fd), M);
+    // llvm::outs() << "[SILGen] emitOrDelayFunction\n"; llvm::outs().flush();
     emitOrDelayFunction(SILDeclRef(decl, fd->hasOnlyCEntryPoint()));
+    // llvm::outs() << "[SILGen] emitOrDelayFunction done\n"; llvm::outs().flush();
   }
 }
 
@@ -2215,17 +2229,22 @@ void SILGenModule::emitSourceFile(SourceFile *sf) {
   performTypeChecking(*sf);
 
   if (sf->isScriptMode()) {
+    // llvm::outs() << "[SILGen] emitEntryPoint (script mode)...\n"; llvm::outs().flush();
     emitEntryPoint(sf);
+    // llvm::outs() << "[SILGen] emitEntryPoint done.\n"; llvm::outs().flush();
   }
 
+  // llvm::outs() << "[SILGen] visiting top-level decls...\n"; llvm::outs().flush();
   for (auto *D : sf->getTopLevelDecls()) {
     // Emit auxiliary decls.
     D->visitAuxiliaryDecls([&](Decl *auxiliaryDecl) {
       visit(auxiliaryDecl);
     });
-
+    // llvm::outs() << "[SILGen] visit decl kind=" << (int)D->getKind() << "\n"; llvm::outs().flush();
     visit(D);
+    // llvm::outs() << "[SILGen] visit decl done.\n"; llvm::outs().flush();
   }
+  // llvm::outs() << "[SILGen] top-level decls done.\n"; llvm::outs().flush();
 
   // FIXME: Visit macro-generated extensions separately.
   //
@@ -2322,6 +2341,7 @@ ASTLoweringRequest::evaluate(Evaluator &evaluator,
       ctx.LangOpts.AllowModuleWithCompilerErrors)
     return silMod;
 
+  // llvm::outs() << "[SILGen] Creating SILGenModule...\n"; llvm::outs().flush();
   SILGenModule SGM(*silMod, silMod->getSwiftModule());
 
   // Emit a specific set of SILDeclRefs if needed.
@@ -2331,9 +2351,21 @@ ASTLoweringRequest::evaluate(Evaluator &evaluator,
   }
 
   // Emit any whole-files needed.
+  // llvm::outs() << "[SILGen] Emitting source files...\n"; llvm::outs().flush();
   for (auto file : desc.getFilesToEmit()) {
-    if (auto *nextSF = dyn_cast<SourceFile>(file))
+    if (auto *nextSF = dyn_cast<SourceFile>(file)) {
+      // llvm::outs() << "[SILGen] emitSourceFile for: "
+      //              << nextSF->getFilename() << "\n";
+      // llvm::outs() << "[SILGen] top-level decls: "
+      //              << nextSF->getTopLevelDecls().size() << "\n";
+      // for (auto *D : nextSF->getTopLevelDecls()) {
+      //   llvm::outs() << "[SILGen]   decl kind=" << (int)D->getKind()
+      //                << " isScriptMode=" << nextSF->isScriptMode() << "\n";
+      // }
+      // llvm::outs().flush();
       SGM.emitSourceFile(nextSF);
+      // llvm::outs() << "[SILGen] emitSourceFile done.\n"; llvm::outs().flush();
+    }
   }
 
   // Also make sure to process any intermediate files that may contain SIL.
@@ -2350,19 +2382,32 @@ ASTLoweringRequest::evaluate(Evaluator &evaluator,
   // Emit any delayed definitions that were forced.
   // Emitting these may in turn force more definitions, so we have to take
   // care to keep pumping the queues.
+  // llvm::outs() << "[SILGen] Pumping pending queues"
+  //              << " (forcedFns=" << SGM.pendingForcedFunctions.size()
+  //              << " conformances=" << SGM.pendingConformances.size()
+  //              << ")...\n"; llvm::outs().flush();
+  // (void)queueIter; // suppress unused-variable warning when logs are disabled
+  // int queueIter = 0;
   while (!SGM.pendingForcedFunctions.empty()
          || !SGM.pendingConformances.empty()) {
     while (!SGM.pendingForcedFunctions.empty()) {
       auto &front = SGM.pendingForcedFunctions.front();
+      // llvm::outs() << "[SILGen] pendingForcedFn[" << queueIter++ << "]: "
+      //              << front.getDecl()->getBaseName() << "\n"; llvm::outs().flush();
       SGM.emitFunctionDefinition(
           front, SGM.getEmittedFunction(front, ForDefinition));
       SGM.pendingForcedFunctions.pop_front();
     }
     while (!SGM.pendingConformances.empty()) {
-      (void)SGM.getWitnessTable(SGM.pendingConformances.front());
+      auto conf = SGM.pendingConformances.front();
+      // llvm::outs() << "[SILGen] pendingConformance[" << queueIter++ << "]: "
+      //              << conf->getProtocol()->getName() << "\n"; llvm::outs().flush();
+      (void)SGM.getWitnessTable(conf);
       SGM.pendingConformances.pop_front();
     }
   }
+  // llvm::outs() << "[SILGen] Queue pump done.\n"; llvm::outs().flush();
+  // int queueIter = 0; // used only by the [SILGen] debug logs above
 
   return silMod;
 }

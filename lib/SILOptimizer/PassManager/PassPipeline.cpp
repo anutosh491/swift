@@ -89,7 +89,9 @@ static void addMandatoryDebugSerialization(SILPassPipelinePlan &P) {
   P.startPipeline("Mandatory Debug Serialization");
   P.addAddressLowering();
   P.addOwnershipModelEliminator();
+#ifndef __EMSCRIPTEN__
   P.addMandatoryInlining();
+#endif
 }
 
 // This pipeline defines a set of mandatory diagnostic passes and a set of
@@ -208,8 +210,10 @@ static void addMandatoryDiagnosticOptPipeline(SILPassPipelinePlan &P) {
       P.addDestroyAddrHoisting();
     }
   }
+#ifndef __EMSCRIPTEN__
   P.addMandatoryInlining();
   P.addMandatorySILLinker();
+#endif
 
   // Promote loads as necessary to ensure we have enough SSA formation to emit
   // SSA based diagnostics.

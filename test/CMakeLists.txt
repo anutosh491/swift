@@ -159,7 +159,8 @@ function(get_test_dependencies SDK result_var_name)
      ("${SDK}" STREQUAL "ANDROID") OR
      ("${SDK}" STREQUAL "WINDOWS") OR
      ("${SDK}" STREQUAL "HAIKU") OR
-     ("${SDK}" STREQUAL "WASI"))
+     ("${SDK}" STREQUAL "WASI") OR
+     ("${SDK}" STREQUAL "EMSCRIPTEN"))
     # No extra dependencies.
   else()
     message(FATAL_ERROR "Unknown SDK: ${SDK}")
@@ -403,10 +404,13 @@ foreach(SDK ${SWIFT_SDKS})
       set(VARIANT_EXTERNAL_EMBEDDED_PLATFORM FALSE)
       set(VARIANT_EXTERNAL_EMBEDDED_DEVICE)
 
-      # Reset these values for WASI, as Embedded Swift for WASI requires separate lit configs.
+      # Wasm-hosted SDKs have their own embedded-stdlib lit config; disable
+      # the embedded features on the non-embedded lit config so the same
+      # embedded test is not matched and executed twice.
       set(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_old ${SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB})
       set(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING_old ${SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING})
-      if("${SDK}" STREQUAL "WASI")
+      sdk_has_wasm_sysroot("${SDK}" _sdk_has_wasm_sysroot)
+      if(_sdk_has_wasm_sysroot)
         set(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB OFF)
         set(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING OFF)
       endif()
@@ -433,7 +437,7 @@ foreach(SDK ${SWIFT_SDKS})
           "${test_bin_dir}/lit.swift-features.cfg"
           "${validation_test_bin_dir}/lit.swift-features.cfg")
 
-      # Restore old values in case they were reset for WASI tests lit configs.
+      # Restore old values in case they were reset above for Wasm-hosted SDKs.
       set(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB ${SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_old})
       set(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING ${SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING_old})
 
@@ -601,11 +605,16 @@ foreach(SDK ${SWIFT_SDKS})
         endforeach()
       endforeach()
 
-      if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING AND (${ARCH} STREQUAL "wasm32"))
+      sdk_has_wasm_sysroot("${SDK}" _sdk_has_wasm_sysroot)
+      if(SWIFT_SHOULD_BUILD_EMBEDDED_STDLIB_CROSS_COMPILING AND _sdk_has_wasm_sysroot)
+        # Look up the (suffix, triple) pair from the registry in SwiftUtils.cmake.
+        # Any Wasm-hosted SDK enumerated in SWIFT_WASM_HOSTED_SDKS must have
+        # matching SWIFT_EMBEDDED_${SDK}_SUFFIX / SWIFT_EMBEDDED_${SDK}_TRIPLE
+        # entries.
+        set(VARIANT_SUFFIX "${SWIFT_EMBEDDED_${SDK}_SUFFIX}")
+        set(VARIANT_TRIPLE "${SWIFT_EMBEDDED_${SDK}_TRIPLE}")
         set(test_mode "optimize_none")
         set(test_subset "primary")
-        set(VARIANT_SUFFIX "-embedded-wasi")
-        set(VARIANT_TRIPLE "wasm32-unknown-wasip1")
         set(test_bin_dir "${CMAKE_CURRENT_BINARY_DIR}${VARIANT_SUFFIX}/embedded")
         set(VARIANT_EXTERNAL_EMBEDDED_PLATFORM FALSE)
         set(VARIANT_EXTERNAL_EMBEDDED_DEVICE)
@@ -636,7 +645,7 @@ foreach(SDK ${SWIFT_SDKS})
             DEPENDS ${dependencies}
             COMMENT "Running ${test_subset} Swift tests for ${VARIANT_TRIPLE}"
             USES_TERMINAL)
-        endif()
+      endif()
     endforeach()
   endforeach()
 endforeach()

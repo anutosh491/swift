@@ -42,7 +42,9 @@
 #include <fstream>
 
 #ifndef SWIFT_ENABLE_SWIFT_IN_SWIFT
+#ifndef __EMSCRIPTEN__
 #error "Building the compiler without Swift sources is not supported anymore"
+#endif
 #endif
 
 using namespace swift;

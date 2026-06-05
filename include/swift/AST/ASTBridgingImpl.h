@@ -146,6 +146,10 @@ BridgedDeclContext_getParentSourceFile(BridgedDeclContext dc) {
 // MARK: BridgedSoureFile
 //===----------------------------------------------------------------------===//
 
+bool BridgedSourceFile_allowsTopLevelCode(BridgedSourceFile sf) {
+  return sf.unbridged()->allowsTopLevelCode();
+}
+
 bool BridgedSourceFile_isScriptMode(BridgedSourceFile sf) {
   return sf.unbridged()->isScriptMode();
 }

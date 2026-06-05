@@ -12468,6 +12468,18 @@ struct DenseMapInfo<swift::SILDebugVariable> {
   static bool isEqual(const KeyTy &LHS, const KeyTy &RHS) { return LHS == RHS; }
 };
 
+#ifdef __EMSCRIPTEN__
+// On wasm32, alignof(SILInstruction) == 4 (2 bits) but the system allocator
+// guarantees 8-byte alignment, making 3 bits safe for PointerIntPair.
+template <> struct PointerLikeTypeTraits<swift::SILInstruction *> {
+  static inline void *getAsVoidPointer(swift::SILInstruction *P) { return P; }
+  static inline swift::SILInstruction *getFromVoidPointer(void *P) {
+    return static_cast<swift::SILInstruction *>(P);
+  }
+  static constexpr int NumLowBitsAvailable = 3;
+};
+#endif
+
 } // end llvm namespace
 
 #endif

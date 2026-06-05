@@ -173,13 +173,28 @@ public:
   /// The address of an object of type T.
   Address Addr;
 
+  // wasm32 pointers are 4-byte aligned (2 free bits), but Kind has 5 values
+  // (needs 3 bits), so PointerIntPair<Value*,3> fails the static_assert.
+  // Use separate fields on Emscripten and PointerIntPair everywhere else.
+#ifdef __EMSCRIPTEN__
+  llvm::Value *ExtraInfoPtr = nullptr;
+  Kind KindVal = StaticAlloca;
+#else
   llvm::PointerIntPair<llvm::Value*, 3, Kind> ExtraInfoAndKind;
+#endif
 
 public:
+#ifdef __EMSCRIPTEN__
+  StackAddress() : ExtraInfoPtr(nullptr), KindVal(StaticAlloca) {}
+
+  explicit StackAddress(Address address, Kind kind, llvm::Value *extraInfo = nullptr)
+    : Addr(address), ExtraInfoPtr(extraInfo), KindVal(kind) {}
+#else
   StackAddress() : ExtraInfoAndKind(nullptr, StaticAlloca) {}
 
   explicit StackAddress(Address address, Kind kind, llvm::Value *extraInfo = nullptr)
     : Addr(address), ExtraInfoAndKind(extraInfo, kind) {}
+#endif
 
   /// Return a StackAddress with the address changed in some superficial way.
   StackAddress withAddress(Address addr) const {
@@ -189,13 +204,23 @@ public:
   llvm::Value *getAddressPointer() const { return Addr.getAddress(); }
   Alignment getAlignment() const { return Addr.getAlignment(); }
   Address getAddress() const { return Addr; }
+#ifdef __EMSCRIPTEN__
+  Kind getKind() const { return KindVal; }
+  llvm::Value *getExtraInfo() const { return ExtraInfoPtr; }
+#else
   Kind getKind() const { return ExtraInfoAndKind.getInt(); }
   llvm::Value *getExtraInfo() const { return ExtraInfoAndKind.getPointer(); }
+#endif
 
   bool isValid() const { return Addr.isValid(); }
 
   bool operator==(StackAddress RHS) const {
+#ifdef __EMSCRIPTEN__
+    return Addr == RHS.Addr && ExtraInfoPtr == RHS.ExtraInfoPtr &&
+           KindVal == RHS.KindVal;
+#else
     return Addr == RHS.Addr && ExtraInfoAndKind == RHS.ExtraInfoAndKind;
+#endif
   }
   bool operator!=(StackAddress RHS) const { return !(*this == RHS); }
 };

@@ -892,14 +892,18 @@ namespace {
                     ->getSingletonMetadataInitialization();
 
         // Complete the metadata's instantiation.
-        auto dependency =
-          initialization.CompletionFunction(metadata, &context->Public,
-                                            /*pattern*/ nullptr);
+        // CompletionFunction is nullable; on platforms without ObjC runtime
+        // (e.g. Emscripten), some classes have no completion work to do.
+        if (!initialization.CompletionFunction.isNull()) {
+          auto dependency =
+            initialization.CompletionFunction(metadata, &context->Public,
+                                              /*pattern*/ nullptr);
 
-        // If this failed with a dependency, infer the current metadata state
-        // and return.
-        if (dependency) {
-          return { inferStateForMetadata(metadata), dependency };
+          // If this failed with a dependency, infer the current metadata state
+          // and return.
+          if (dependency) {
+            return { inferStateForMetadata(metadata), dependency };
+          }
         }
       }
 
