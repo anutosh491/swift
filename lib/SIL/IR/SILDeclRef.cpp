@@ -527,6 +527,12 @@ static LinkageLimit getLinkageLimit(SILDeclRef constant) {
     return cast<VarDecl>(d)->isResilient() ? Limit::NeverPublic : Limit::None;
 
   case Kind::DefaultArgGenerator:
+    // On wasm32/Emscripten, MandatoryInlining is disabled so default argument
+    // generators (normally PublicNonABI/AlwaysEmitIntoClient) are never inlined
+    // into per-cell SIDE_MODULE wasm files. Give them Public linkage so they are
+    // exported from the library and resolvable via dlopen at runtime.
+    if (constant.getASTContext().LangOpts.Target.isOSEmscripten())
+      return Limit::None;
     // If the default argument is to be serialized, only use non-ABI public
     // linkage. If the argument is not to be serialized, don't use a limit.
     // This actually means that default arguments *can be ABI public* if

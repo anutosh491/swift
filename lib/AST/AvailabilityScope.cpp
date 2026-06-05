@@ -80,6 +80,7 @@ AvailabilityScope::createForSourceFile(SourceFile *SF,
   case SourceFileKind::Library:
   case SourceFileKind::Main:
   case SourceFileKind::Interface:
+  case SourceFileKind::REPL:
     break;
   case SourceFileKind::SIL:
     llvm_unreachable("unexpected SourceFileKind");

@@ -705,6 +705,8 @@ class BuildScriptInvocation(object):
                             is_enabled=self.args.build_emscriptenstdlib)
         builder.add_product(products.EmscriptenSwiftSDK,
                             is_enabled=self.args.build_emscriptenstdlib)
+        builder.add_product(products.EmscriptenSwift,
+                            is_enabled=self.args.build_emscriptenswift)
 
         builder.add_product(products.SwiftFoundationTests,
                             is_enabled=self.args.build_foundation)

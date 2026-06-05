@@ -1194,7 +1194,12 @@ llvm::Expected<SILFunction *> SILDeserializer::readSILFunctionChecked(
 
   // Stop here if we have nothing else to do.
   if (isEmptyFunction || declarationOnly) {
-    if (genericEnv)
+    // For declaration-only reads (linkage updates), skip setGenericEnvironment.
+    // Building the forwarding substitution map via getForwardingSubstitutionMap()
+    // is unnecessary here — linkage is already updated above — and crashes on
+    // wasm32 due to GenericEnvironment TrailingObjects layout differences.
+    // setGenericEnvironment is called properly on the full-deserialization path.
+    if (genericEnv && !declarationOnly)
       fn->setGenericEnvironment(genericEnv);
     return fn;
   }

@@ -626,6 +626,9 @@ SWIFT_NAME("getter:BridgedDeclContext.parentSourceFile(self:)")
 BRIDGED_INLINE BridgedSourceFile
 BridgedDeclContext_getParentSourceFile(BridgedDeclContext dc);
 
+SWIFT_NAME("getter:BridgedSourceFile.allowsTopLevelCode(self:)")
+BRIDGED_INLINE bool BridgedSourceFile_allowsTopLevelCode(BridgedSourceFile sf);
+
 SWIFT_NAME("getter:BridgedSourceFile.isScriptMode(self:)")
 BRIDGED_INLINE bool BridgedSourceFile_isScriptMode(BridgedSourceFile sf);
 

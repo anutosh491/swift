@@ -35,7 +35,8 @@ class EmscriptenSysroot(product.Product):
         return False
 
     def should_build(self, host_target):
-        return self.args.build_emscriptenstdlib
+        return (self.args.build_emscriptenstdlib or
+                getattr(self.args, 'build_emscriptenswift', False))
 
     def should_test(self, host_target):
         return False
@@ -128,7 +129,9 @@ class EmscriptenLLVMRuntimeLibs(cmake_product.CMakeProduct):
         # sysroot already contains libc++, libc++abi, and compiler-rt
         # built by embuilder, so rebuilding from local llvm-project sources
         # is unnecessary and can cause version mismatches.
-        return self.args.build_emscriptenstdlib and not self.args.emscripten_path
+        needs_emscripten = (self.args.build_emscriptenstdlib or
+                            getattr(self.args, 'build_emscriptenswift', False))
+        return needs_emscripten and not self.args.emscripten_path
 
     def should_test(self, host_target):
         return False

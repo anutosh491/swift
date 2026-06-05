@@ -795,7 +795,10 @@ RValue RValueEmitter::visitLazyInitializerExpr(LazyInitializerExpr *E,
 }
 
 RValue RValueEmitter::visitApplyExpr(ApplyExpr *E, SGFContext C) {
-  return SGF.emitApplyExpr(E, C);
+  // llvm::outs() << "[SILGen] visitApplyExpr\n"; llvm::outs().flush();
+  auto result = SGF.emitApplyExpr(E, C);
+  // llvm::outs() << "[SILGen] visitApplyExpr done !\n"; llvm::outs().flush();
+  return result;
 }
 
 SILValue SILGenFunction::emitEmptyTuple(SILLocation loc) {
@@ -2373,9 +2376,14 @@ RValue RValueEmitter::visitUnsafeCastExpr(UnsafeCastExpr *E, SGFContext C) {
 }
 
 RValue RValueEmitter::visitErasureExpr(ErasureExpr *E, SGFContext C) {
+  // llvm::outs() << "[SILGen] visitErasureExpr: subExpr type="
+  //              << E->getSubExpr()->getType().getString()
+  //              << " → " << E->getType().getString() << "\n"; llvm::outs().flush();
   if (auto result = tryEmitAsBridgingConversion(SGF, E, false, C)) {
+    // llvm::outs() << "[SILGen] visitErasureExpr: bridging path\n"; llvm::outs().flush();
     return RValue(SGF, E, *result);
   }
+  // llvm::outs() << "[SILGen] visitErasureExpr: existential erasure path\n"; llvm::outs().flush();
 
   auto &existentialTL = SGF.getTypeLowering(E->getType());
   auto concreteFormalType = E->getSubExpr()->getType()->getCanonicalType();
@@ -2385,14 +2393,19 @@ RValue RValueEmitter::visitErasureExpr(ErasureExpr *E, SGFContext C) {
   auto &concreteTL = SGF.getTypeLowering(abstractionPattern,
                                          concreteFormalType);
 
+  // llvm::outs() << "[SILGen] emitExistentialErasure call\n"; llvm::outs().flush();
   ManagedValue mv = SGF.emitExistentialErasure(E, concreteFormalType,
                                                concreteTL, existentialTL,
                                                E->getConformances(), C,
                                [&](SGFContext C) -> ManagedValue {
-                                 return SGF.emitRValueAsOrig(E->getSubExpr(),
+                                 // llvm::outs() << "[SILGen] emitRValueAsOrig for subExpr\n"; llvm::outs().flush();
+                                 auto result = SGF.emitRValueAsOrig(E->getSubExpr(),
                                                              abstractionPattern,
                                                              concreteTL, C);
+                                 // llvm::outs() << "[SILGen] emitRValueAsOrig done\n"; llvm::outs().flush();
+                                 return result;
                                });
+  // llvm::outs() << "[SILGen] emitExistentialErasure done\n"; llvm::outs().flush();
 
   return RValue(SGF, E, mv);
 }

@@ -73,8 +73,23 @@ struct GenericCacheEntry final
     auto pattern = generics.DefaultInstantiationPattern.get();
 
     // Call the pattern's instantiation function.
+    // On wasm32 with Emscripten SIDE_MODULE dynamic linking, function pointer
+    // table indices in metadata patterns may not be patched by the dynamic
+    // linker, leaving InstantiationFunction as 0. Fall back to the default
+    // class allocator (which is what the default InstantiationFunction does).
+#ifdef __EMSCRIPTEN__
+    Metadata *metadata;
+    if (pattern->InstantiationFunction) {
+      metadata = pattern->InstantiationFunction(description, arguments, pattern);
+    } else {
+      metadata = swift_allocateGenericClassMetadata(
+          cast<ClassDescriptor>(description), arguments,
+          static_cast<const GenericClassMetadataPattern *>(pattern));
+    }
+#else
     auto metadata =
         pattern->InstantiationFunction(description, arguments, pattern);
+#endif
 
     // If there's no completion function, do a quick-and-dirty check to
     // see if all of the type arguments are already complete.  If they
@@ -113,13 +128,17 @@ struct GenericCacheEntry final
       auto pattern = generics.DefaultInstantiationPattern.get();
 
       // Complete the metadata's instantiation.
-      auto dependency =
-          pattern->CompletionFunction(metadata, &context->Public, pattern);
+      // CompletionFunction is nullable (hasCompletionFunction() may be false
+      // for some types on certain platforms). Guard before calling.
+      if (!pattern->CompletionFunction.isNull()) {
+        auto dependency =
+            pattern->CompletionFunction(metadata, &context->Public, pattern);
 
-      // If this failed with a dependency, infer the current metadata state
-      // and return.
-      if (dependency) {
-        return {inferStateForMetadata(metadata), dependency};
+        // If this failed with a dependency, infer the current metadata state
+        // and return.
+        if (dependency) {
+          return {inferStateForMetadata(metadata), dependency};
+        }
       }
     }
 

@@ -311,6 +311,7 @@ bool shouldParseViaASTGen(SourceFile &SF) {
     case SourceFileKind::Interface:
     case SourceFileKind::MacroExpansion:
     case SourceFileKind::DefaultArgument:
+    case SourceFileKind::REPL:
       break;
   }
 

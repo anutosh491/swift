@@ -43,9 +43,10 @@ public:
 
   void run() override {
     SILModule &M = *getModule();
-    for (auto &Fn : M)
+    for (auto &Fn : M) {
       if (M.linkFunction(&Fn, LinkMode))
         invalidateAnalysis(&Fn, SILAnalysis::InvalidationKind::Everything);
+    }
 
     // In embedded Swift, the stdlib contains all the runtime functions needed
     // (swift_retain, etc.). Link them in so they can be referenced in IRGen.

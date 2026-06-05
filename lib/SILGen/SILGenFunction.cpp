@@ -1131,33 +1131,43 @@ SILGenFunction::emitClosureValue(SILLocation loc, SILDeclRef constant,
 void SILGenFunction::emitFunction(FuncDecl *fd) {
   MagicFunctionName = SILGenModule::getMagicFunctionName(fd);
 
+  // llvm::outs() << "[SILGenFn] getLoweredLocalCaptures\n"; llvm::outs().flush();
   auto captureInfo = SGM.M.Types.getLoweredLocalCaptures(SILDeclRef(fd));
+  // llvm::outs() << "[SILGenFn] emitProlog\n"; llvm::outs().flush();
   emitProlog(fd, captureInfo, fd->getParameters(), fd->getImplicitSelfDecl(),
              fd->getResultInterfaceType(), fd->getEffectiveThrownErrorType(),
              fd->getThrowsLoc());
+  // llvm::outs() << "[SILGenFn] emitProlog done\n"; llvm::outs().flush();
 
   if (fd->isDistributedActorFactory()) {
     // Synthesize the factory function body
     emitDistributedActorFactory(fd);
   } else {
+    // llvm::outs() << "[SILGenFn] prepareEpilog\n"; llvm::outs().flush();
     prepareEpilog(fd,
                   fd->getResultInterfaceType(),
                   fd->getEffectiveThrownErrorType(),
                   CleanupLocation(fd));
+    // llvm::outs() << "[SILGenFn] prepareEpilog done\n"; llvm::outs().flush();
 
     if (fd->requiresUnavailableDeclABICompatibilityStubs())
       emitApplyOfUnavailableCodeReached();
 
     assert(!fd->isBodySkipped());
+    // llvm::outs() << "[SILGenFn] emitProfilerIncrement\n"; llvm::outs().flush();
     emitProfilerIncrement(fd->getTypecheckedBody());
-
+    // llvm::outs() << "[SILGenFn] emitStmt body\n"; llvm::outs().flush();
     // Emit the actual function body as usual
     emitStmt(fd->getTypecheckedBody());
+    // llvm::outs() << "[SILGenFn] emitStmt done\n"; llvm::outs().flush();
 
     emitEpilog(fd);
+    // llvm::outs() << "[SILGenFn] emitEpilog done\n"; llvm::outs().flush();
   }
 
+  // llvm::outs() << "[SILGenFn] finalizeEmission\n"; llvm::outs().flush();
   finalizeEmission();
+  // llvm::outs() << "[SILGenFn] finalizeEmission done.\n"; llvm::outs().flush();
 }
 
 void SILGenFunction::emitClosure(AbstractClosureExpr *ace) {
